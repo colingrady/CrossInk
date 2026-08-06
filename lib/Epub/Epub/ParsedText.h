@@ -68,7 +68,25 @@ class ParsedText {
   std::vector<uint8_t> lineBionicBoundaryScratch;
   std::vector<bool> lineGuideDotBeforeScratch;
   std::vector<uint8_t> lineBackgroundBlackScratch;
+  std::vector<std::string> outWordsScratch;
+  std::vector<int16_t> outXPosScratch;
+  std::vector<EpdFontFamily::Style> outStylesScratch;
+  std::vector<uint8_t> outBoundariesScratch;
+  std::vector<uint16_t> outRunOffsetsScratch;
+  std::vector<uint16_t> outGuideDotXOffsetScratch;
+  std::vector<uint8_t> outBackgroundBlackScratch;
+  std::vector<std::string> reorderedRubyTextsScratch;
   std::vector<uint16_t> visualOrderScratch;
+
+  struct RubyGroupInfo {
+    size_t start;
+    size_t count;
+    int baseWidth;
+    int rubyWidth;
+    int leftOverlap;
+    int rightOverlap;
+  };
+  std::vector<RubyGroupInfo> rubyGroupsScratch;
 
   void reserveTokenCapacity(size_t additionalTokens);
   int resolveFirstLineIndent(bool isFirstLine, const GfxRenderer& renderer, int fontId) const;

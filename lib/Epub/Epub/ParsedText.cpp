@@ -904,16 +904,8 @@ bool ParsedText::calculateWordWidths(ArenaVector<uint16_t>& wordWidths, const Gf
     const int ascender = renderer.getFontAscenderSize(fontId);
     const int maxOverhang = ascender / 2;  // Maximum overhang over non-ideographic characters (Kana, punctuation, etc.)
 
-    struct RubyGroupInfo {
-      size_t start;
-      size_t count;
-      int baseWidth;
-      int rubyWidth;
-      int leftOverlap;
-      int rightOverlap;
-    };
-
-    std::vector<RubyGroupInfo> groups;
+    auto& groups = rubyGroupsScratch;
+    groups.clear();
     for (size_t i = 0; i < words.size(); ++i) {
       if (i < rubyTexts.size() && !rubyTexts[i].empty() && (wordStyles[i] & EpdFontFamily::RUBY_CONTINUE) == 0) {
         RubyGroupInfo g;
@@ -1592,8 +1584,11 @@ bool ParsedText::extractLine(Arena& scratchArena, const size_t breakIndex, const
   int activeJustifyExtra = justifyExtra;
 
   if (willReorder) {
-    std::vector<std::string> reorderedRubyTexts;
-    if (!lineRubyTexts.empty()) reorderedRubyTexts.reserve(visualOrderScratch.size());
+    auto& reorderedRubyTexts = reorderedRubyTextsScratch;
+    reorderedRubyTexts.clear();
+    if (!lineRubyTexts.empty()) {
+      reorderedRubyTexts.reserve(visualOrderScratch.size());
+    }
     reorderedWordsScratch.clear();
     reorderedStylesScratch.clear();
     reorderedWidthsScratch.clear();
@@ -1784,13 +1779,20 @@ bool ParsedText::extractLine(Arena& scratchArena, const size_t breakIndex, const
     }
   }
 
-  std::vector<std::string> outWords;
-  std::vector<int16_t> outXPos;
-  std::vector<EpdFontFamily::Style> outStyles;
-  std::vector<uint8_t> outBoundaries;
-  std::vector<uint16_t> outRunOffsets;
-  std::vector<uint16_t> outGuideDotXOffset;
-  std::vector<uint8_t> outBackgroundBlack;
+  auto& outWords = outWordsScratch;
+  auto& outXPos = outXPosScratch;
+  auto& outStyles = outStylesScratch;
+  auto& outBoundaries = outBoundariesScratch;
+  auto& outRunOffsets = outRunOffsetsScratch;
+  auto& outGuideDotXOffset = outGuideDotXOffsetScratch;
+  auto& outBackgroundBlack = outBackgroundBlackScratch;
+  outWords.clear();
+  outXPos.clear();
+  outStyles.clear();
+  outBoundaries.clear();
+  outRunOffsets.clear();
+  outGuideDotXOffset.clear();
+  outBackgroundBlack.clear();
   outWords.reserve(lineWordCount);
   outXPos.reserve(lineWordCount);
   outStyles.reserve(lineWordCount);
