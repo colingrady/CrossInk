@@ -138,7 +138,9 @@ void TxtReaderActivity::onEnter() {
   APP_STATE.saveToFile();
   SleepCoverAssets::prepareTxt(*txt);
   const std::string coverBmpPath = Storage.exists(txt->getCoverBmpPath().c_str()) ? txt->getCoverBmpPath() : "";
-  RECENT_BOOKS.addOrUpdateBook(filePath, fileName, "", coverBmpPath);
+  if (!skipRecentBookUpdateOnEntry) {
+    RECENT_BOOKS.addOrUpdateBook(filePath, fileName, "", coverBmpPath);
+  }
 
   // Trigger first update
   requestUpdate();
@@ -184,6 +186,12 @@ void TxtReaderActivity::openReaderMenu() {
       requestUpdate();
     }
   });
+}
+
+bool TxtReaderActivity::handleFrontlightPanelResult(const FrontlightPanelResult& result) {
+  if (result.action != FrontlightPanelAction::SendNearbyBook || !txt) return false;
+  saveProgress(currentPage);
+  return activityManager.goToNearbyBookSend(txt->getPath(), true);
 }
 
 void TxtReaderActivity::loop() {
@@ -242,7 +250,7 @@ void TxtReaderActivity::loop() {
   }
 
   // Short press BACK goes directly to home
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back) &&
+  if (!touch.prev && !touch.next && mappedInput.wasReleased(MappedInputManager::Button::Back) &&
       mappedInput.getHeldTime() < ReaderUtils::GO_HOME_MS) {
     onGoHome();
     return;
@@ -421,7 +429,7 @@ bool TxtReaderActivity::handleTwoFingerRotation(const bool clockwise) {
 }
 
 void TxtReaderActivity::toggleDarkMode() {
-  SETTINGS.readerDarkMode = !SETTINGS.readerDarkMode;
+  SETTINGS.screenInverted = !SETTINGS.screenInverted;
   SETTINGS.saveToFile();
   requestUpdate();
 }
@@ -452,6 +460,7 @@ bool TxtReaderActivity::consumeLongPowerButtonHold() {
 
 bool TxtReaderActivity::supportsQuickAction(const CrossPointSettings::SHORT_PWRBTN action) {
   switch (action) {
+    case CrossPointSettings::SHORT_PWRBTN::PREVIOUS_PAGE:
     case CrossPointSettings::SHORT_PWRBTN::SLEEP:
     case CrossPointSettings::SHORT_PWRBTN::FORCE_REFRESH:
     case CrossPointSettings::SHORT_PWRBTN::FILE_TRANSFER:
@@ -471,6 +480,12 @@ bool TxtReaderActivity::supportsQuickAction(const CrossPointSettings::SHORT_PWRB
 
 bool TxtReaderActivity::executeReaderShortcutAction(const CrossPointSettings::SHORT_PWRBTN action) {
   switch (action) {
+    case CrossPointSettings::SHORT_PWRBTN::PREVIOUS_PAGE:
+      if (currentPage > 0) {
+        currentPage--;
+        requestUpdate();
+      }
+      return true;
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_FONT:
       cycleReaderFont();
       return true;
@@ -819,7 +834,7 @@ void TxtReaderActivity::renderPage() {
 
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
-  if (SETTINGS.textAntiAliasing && ReaderUtils::readerForegroundBlack()) {
+  if (SETTINGS.textAntiAliasing) {
     ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
   }
   // scope destructor clears font cache via FontCacheManager
@@ -837,6 +852,23 @@ void TxtReaderActivity::renderStatusBar() const {
   }
   GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, title.c_str(), 0, 0, false, nullptr,
                     ReaderUtils::readerDarkModeEnabled());
+}
+
+bool TxtReaderActivity::getFrontlightPanelBookDetails(FrontlightPanelBookDetails& details) {
+  RenderLock lock(*this);
+  if (!txt) return false;
+
+  details.title = txt->getTitle();
+  details.author.clear();
+  details.chapter.clear();
+  if (!initialized || totalPages <= 0) {
+    details.progressPercent = 0;
+    return true;
+  }
+
+  const int page = std::clamp(currentPage, 0, totalPages - 1);
+  details.progressPercent = (page + 1) * 100 / totalPages;
+  return true;
 }
 
 bool TxtReaderActivity::saveProgress(const int page) {

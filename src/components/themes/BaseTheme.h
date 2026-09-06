@@ -30,6 +30,14 @@ enum class ThemeTabBarAppearance : uint8_t {
   BorderedText,
 };
 
+// The Classic and Lyra-derived themes share the same status-bar artwork.
+// Keep its bounds in one place so changing a theme cannot subtly shift the
+// clock or battery percentage relative to the other main themes.
+namespace StatusBarMetrics {
+constexpr int batteryWidth = 15;
+constexpr int batteryHeight = 12;
+}  // namespace StatusBarMetrics
+
 struct ThemeMetrics {
   int batteryWidth;
   int batteryHeight;
@@ -143,8 +151,8 @@ enum UIIcon {
 // Additional themes can inherit from this and override methods as needed
 
 namespace BaseMetrics {
-constexpr ThemeMetrics values = {.batteryWidth = 15,
-                                 .batteryHeight = 12,
+constexpr ThemeMetrics values = {.batteryWidth = StatusBarMetrics::batteryWidth,
+                                 .batteryHeight = StatusBarMetrics::batteryHeight,
                                  .topPadding = 5,
                                  .batteryBarHeight = 45,
                                  .headerHeight = 70,
@@ -274,7 +282,8 @@ class BaseTheme {
                                int selectedIndex, bool showConfirmationFooter = false,
                                const char* cancelLabel = nullptr, const char* saveLabel = nullptr,
                                bool saveFocused = false, int primaryOptionIndex = -1, const char* noteLabel = nullptr,
-                               const char* noteBody = nullptr) const;
+                               const char* noteBody = nullptr, const std::vector<bool>& disabledOptions = {},
+                               int firstOptionIndex = -1) const;
   virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const;
   // title is borrowed and must stay alive for the call; pass nullptr or "" for none.
   virtual void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
@@ -284,7 +293,8 @@ class BaseTheme {
                              float chapterProgressPercent = -1.0f, int stableCurrentPage = 0, int stablePageCount = 0,
                              bool showProgress = true, bool pageCountEstimated = false) const;
   virtual void drawTopStatusBarClock(const GfxRenderer& renderer, int topY = -1, const char* previewTime = nullptr,
-                                     bool readerContext = true, int textYOffset = 0, bool darkMode = false) const;
+                                     bool readerContext = true, int textYOffset = 0, bool darkMode = false,
+                                     bool forceVisible = false) const;
   virtual void drawHelpText(const GfxRenderer& renderer, Rect rect, const char* label) const;
   virtual void drawTextField(const GfxRenderer& renderer, Rect rect, const int textWidth, bool cursorMode = false,
                              int contentStartX = 0, int contentWidth = 0) const;

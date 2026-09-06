@@ -7,7 +7,8 @@
 #include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
-#include "components/icons/chart.h"
+#include "components/icons/listIcons.h"
+#include "components/icons/readingStatsIcons.h"
 #include "fontIds.h"
 
 namespace fui = freeink::ui;
@@ -71,6 +72,7 @@ void NetworkModeSelectionActivity::onEnter() {
   ui.closeRouting();
   visibleRows = 1;
   topIndex = 0;
+  listNav.reset(listIndexForMenuIndex(selectedIndex));
   ui.reset();
   ui.app.on(ACTION_ROW, &NetworkModeSelectionActivity::onRowEvent, this);
   ui.app.setScreen(&NetworkModeSelectionActivity::listScreen, this);
@@ -107,16 +109,53 @@ void NetworkModeSelectionActivity::loop() {
     }
   }
 
+  // Swipes scroll the viewport; the selection stays put and button
+  // navigation pulls the view back to it.
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
+    bool moved = false;
+    {
+      RenderLock lock(*this);
+      listNav.selected = listIndexForMenuIndex(selectedIndex);
+      listNav.top = topIndex;
+      listNav.visibleRows = visibleRows;
+      // Page by the rows the last layout measured, not the fixed-height
+      // estimate: wrapped subtitles fit fewer rows, and paging by the larger
+      // estimate would skip the ones in between.
+      const int page = listNav.pageRowsFor(LIST_ITEM_COUNT);
+      moved = listNav.scrollBy(swipe == MappedInputManager::SwipeDir::Up ? page : -page, LIST_ITEM_COUNT);
+      topIndex = listNav.top;
+    }
+    if (moved) {
+      requestUpdate();
+    }
+    return;
+  }
+
   // Handle navigation
   buttonNavigator.onNext([this] {
-    selectedIndex = ButtonNavigator::nextIndex(selectedIndex, MENU_ITEM_COUNT);
-    topIndex = followListSelection(listIndexForMenuIndex(selectedIndex), topIndex, visibleRows, LIST_ITEM_COUNT);
+    {
+      RenderLock lock(*this);
+      selectedIndex = ButtonNavigator::nextIndex(selectedIndex, MENU_ITEM_COUNT);
+      listNav.selected = listIndexForMenuIndex(selectedIndex);
+      listNav.top = topIndex;
+      listNav.visibleRows = visibleRows;
+      listNav.follow(LIST_ITEM_COUNT);
+      topIndex = listNav.top;
+    }
     requestUpdate();
   });
 
   buttonNavigator.onPrevious([this] {
-    selectedIndex = ButtonNavigator::previousIndex(selectedIndex, MENU_ITEM_COUNT);
-    topIndex = followListSelection(listIndexForMenuIndex(selectedIndex), topIndex, visibleRows, LIST_ITEM_COUNT);
+    {
+      RenderLock lock(*this);
+      selectedIndex = ButtonNavigator::previousIndex(selectedIndex, MENU_ITEM_COUNT);
+      listNav.selected = listIndexForMenuIndex(selectedIndex);
+      listNav.top = topIndex;
+      listNav.visibleRows = visibleRows;
+      listNav.follow(LIST_ITEM_COUNT);
+      topIndex = listNav.top;
+    }
     requestUpdate();
   });
 }
@@ -151,7 +190,7 @@ void NetworkModeSelectionActivity::buildListScreen(UiApp::ScreenType& screen) {
     } else if (menuModes[i] == NetworkMode::NEARBY_BOOK_RECEIVE) {
       item.icon = fui::bitmapFromIcon(icon_chevrons_left_right_ellipsis_32);
     } else if (menuModes[i] == NetworkMode::NEARBY_STATS_SYNC) {
-      item.icon = fui::BitmapRef{ChartListIcon, 32, 32, fui::BitmapFormat::Mask1};
+      item.icon = fui::bitmapFromIcon(icon_reading_stats_32);
     } else {
       item.icon = listIconFor(menuIcons[i], 32);  // subtitle rows carry the larger icon
     }
@@ -178,9 +217,13 @@ void NetworkModeSelectionActivity::buildListScreen(UiApp::ScreenType& screen) {
   props.sectionGap = 10;
   const auto rows = configureUiList(props, screen.theme(), screen.body(), UiListRowType::WithSubtitle);
   visibleRows = rows > 0 ? rows : 1;
-  topIndex = scrollListBy(topIndex, 0, visibleRows, LIST_ITEM_COUNT);  // clamp to range
-  props.topIndex = static_cast<uint16_t>(topIndex);
+  listNav.selected = listIndexForMenuIndex(selectedIndex);
+  listNav.top = topIndex;
+  listNav.visibleRows = visibleRows;
+  listNav.syncToProps(screen.body(), props.rowHeight, props.rowGap, LIST_ITEM_COUNT, props);
+  topIndex = listNav.top;
   screen.list(props);
+  topIndex = listNav.top;
 }
 
 void NetworkModeSelectionActivity::render(RenderLock&&) {
@@ -198,7 +241,11 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
     GUI.drawHeader(renderer, header, tr(STR_FILE_TRANSFER));
   }
 
-  ui.render();
+  ui.closeRouting();
+  for (int pass = 0; pass < 8; ++pass) {
+    ui.render();
+    if (!listNav.consumeRebuildNeeded()) break;
+  }
 
   const auto labels =
       mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));

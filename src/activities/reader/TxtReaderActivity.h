@@ -26,6 +26,7 @@ class TxtReaderActivity final : public Activity {
   bool longPowerButtonHandled = false;
   bool longPressBackHandled = false;
   bool longPressMenuHandled = false;
+  bool skipRecentBookUpdateOnEntry = false;
   ReaderProgressSaveDebouncer progressSaveDebouncer;
 #if CROSSINK_APP_CAP_TOUCH
   ReaderPinchGesture pinchFontGesture;
@@ -79,10 +80,11 @@ class TxtReaderActivity final : public Activity {
 
  public:
   explicit TxtReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Txt> txt,
-                             int initialRefreshCountdown)
+                             int initialRefreshCountdown, bool skipRecentBookUpdateOnEntry = false)
       : Activity("TxtReader", renderer, mappedInput),
         txt(std::move(txt)),
-        pagesUntilFullRefresh(initialRefreshCountdown) {}
+        pagesUntilFullRefresh(initialRefreshCountdown),
+        skipRecentBookUpdateOnEntry(skipRecentBookUpdateOnEntry) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;
@@ -94,12 +96,22 @@ class TxtReaderActivity final : public Activity {
     return true;
   }
   bool isReaderActivity() const override { return true; }
+  bool usesFullScreenReaderVerticalSwipes() const override {
+#if defined(FREEINK_DEVICE_STICKY) && FREEINK_DEVICE_STICKY
+    return true;
+#else
+    return false;
+#endif
+  }
   bool canSnapshotForSleepOverlay() const override { return true; }
   bool allowPowerAsConfirmInReaderMode() const override { return quickActionsPopup.isActive(); }
   bool blocksGlobalInput() const override { return quickActionsPopup.isActive(); }
   bool handleShortcutAction(uint8_t action) override;
   bool handleShortcutAction(CrossPointSettings::SHORT_PWRBTN action) override;
   std::string getCurrentBookPath() const override { return txt ? txt->getPath() : std::string{}; }
+  std::string getCurrentBookTitle() const override { return txt ? txt->getTitle() : std::string{}; }
+  bool getFrontlightPanelBookDetails(FrontlightPanelBookDetails& details) override;
+  bool handleFrontlightPanelResult(const FrontlightPanelResult& result) override;
 
   // Renders the last saved page to the frame buffer without flushing to display.
   // Used by SleepActivity to prepare the background for the overlay sleep mode.

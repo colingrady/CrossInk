@@ -9,6 +9,11 @@
 #include "MappedInputManager.h"
 #include "TextPool.h"
 
+namespace {
+constexpr unsigned long WORD_REPEAT_START_MS = 500;
+constexpr unsigned long WORD_REPEAT_INTERVAL_MS = 500;
+}  // namespace
+
 void WordSelectNavigator::load(std::vector<WordInfo> w, std::vector<Row> r, std::string pool,
                                bool consumeInitialConfirm) {
   ownedWords = std::move(w);
@@ -21,6 +26,8 @@ void WordSelectNavigator::load(std::vector<WordInfo> w, std::vector<Row> r, std:
   currentWordInRow =
       (!rows.empty() && rows[currentRow].wordCount > 0) ? static_cast<int>(rows[currentRow].wordCount) / 2 : 0;
   confirmReleaseConsumed = consumeInitialConfirm;
+  lastWordRepeatTime = 0;
+  wordRepeatActive = false;
 }
 
 void WordSelectNavigator::loadView(WordInfo* w, const size_t wordCount, Row* r, const size_t rowCount, const char* pool,
@@ -35,6 +42,8 @@ void WordSelectNavigator::loadView(WordInfo* w, const size_t wordCount, Row* r, 
   currentWordInRow =
       (!rows.empty() && rows[currentRow].wordCount > 0) ? static_cast<int>(rows[currentRow].wordCount) / 2 : 0;
   confirmReleaseConsumed = consumeInitialConfirm;
+  lastWordRepeatTime = 0;
+  wordRepeatActive = false;
 }
 
 void WordSelectNavigator::organizeIntoRows(std::vector<WordInfo>& words, std::vector<Row>& rows) {
@@ -48,37 +57,6 @@ void WordSelectNavigator::organizeIntoRows(std::vector<WordInfo>& words, std::ve
     }
     words[i].row = static_cast<int16_t>(rows.size() - 1);
     rows.back().wordCount++;
-  }
-}
-
-void WordSelectNavigator::mergeHyphenatedPairs(std::vector<WordInfo>& words, const std::vector<Row>& rows,
-                                               std::string& textPool) {
-  for (size_t r = 0; r + 1 < rows.size(); r++) {
-    if (rows[r].wordCount == 0 || rows[r + 1].wordCount == 0) continue;
-
-    const int lastWordIdx = rows[r].firstWord + rows[r].wordCount - 1;
-    const char* lastWord = textPool.data() + words[lastWordIdx].textOffset;
-    uint16_t lastLen = words[lastWordIdx].textLen;
-    if (lastLen == 0) continue;
-    if (!utf8EndsWithHyphen(lastWord, lastLen)) continue;
-    // A word that also starts with '-' (e.g. -re-) is a standalone affix token,
-    // not the first half of a line-break compound.
-    if (lastWord[0] == '-') continue;
-
-    const int nextWordIdx = rows[r + 1].firstWord;
-    words[lastWordIdx].continuationIndex = nextWordIdx;
-    words[nextWordIdx].continuationOf = lastWordIdx;
-
-    std::string firstPart(lastWord, lastLen);
-    utf8RemoveTrailingHyphen(firstPart);
-    const char* nextWord = textPool.data() + words[nextWordIdx].textOffset;
-    const char* strippedNext = (nextWord[0] == '-') ? nextWord + 1 : nextWord;
-    std::string merged = firstPart + strippedNext;
-    uint16_t mergedOff = poolAppend(textPool, merged.c_str(), merged.size());
-    words[lastWordIdx].lookupOffset = mergedOff;
-    words[lastWordIdx].lookupLen = static_cast<uint16_t>(merged.size());
-    words[nextWordIdx].lookupOffset = mergedOff;
-    words[nextWordIdx].lookupLen = static_cast<uint16_t>(merged.size());
   }
 }
 
@@ -100,6 +78,8 @@ void WordSelectNavigator::reset() {
   anchorFlatIndex = -1;
   completedSelectionStart = -1;
   completedSelectionEnd = -1;
+  lastWordRepeatTime = 0;
+  wordRepeatActive = false;
   pendingSnapIdx = -1;
   snapshot_.clear();
 }
@@ -108,20 +88,6 @@ const WordSelectNavigator::WordInfo* WordSelectNavigator::getSelected() const {
   if (rows.empty() || currentRow >= static_cast<int>(rows.size())) return nullptr;
   if (rows[currentRow].wordCount == 0) return nullptr;
   return &words[rows[currentRow].firstWord + currentWordInRow];
-}
-
-const WordSelectNavigator::WordInfo* WordSelectNavigator::getPairedHalf() const {
-  const WordInfo* sel = getSelected();
-  if (!sel) return nullptr;
-  const int wordIdx = rows[currentRow].firstWord + currentWordInRow;
-  int otherIdx = (sel->continuationOf >= 0) ? sel->continuationOf : -1;
-  if (otherIdx < 0 && sel->continuationIndex >= 0 && sel->continuationIndex != wordIdx) {
-    otherIdx = sel->continuationIndex;
-  }
-  if (otherIdx >= 0 && otherIdx < static_cast<int>(words.size())) {
-    return &words[otherIdx];
-  }
-  return nullptr;
 }
 
 int WordSelectNavigator::getCurrentFlatIndex() const {
@@ -214,12 +180,15 @@ bool WordSelectNavigator::handleNavigation(const MappedInputManager& input, cons
   const bool landscape = isLandscapeCw || isLandscapeCcw;
 
   bool rowPrevPressed, rowNextPressed, wordPrevPressed, wordNextPressed;
+  bool wordPrevHeld, wordNextHeld;
 
   if (isLandscapeCw) {
     rowPrevPressed = input.wasReleased(MappedInputManager::Button::Left);
     rowNextPressed = input.wasReleased(MappedInputManager::Button::Right);
     wordPrevPressed = input.wasReleased(MappedInputManager::Button::Down);
     wordNextPressed = input.wasReleased(MappedInputManager::Button::Up);
+    wordPrevHeld = input.isPressed(MappedInputManager::Button::Down);
+    wordNextHeld = input.isPressed(MappedInputManager::Button::Up);
   } else if (landscape) {
     const bool frontNavSwapped = input.isFrontNavButtonSwapActive();
     rowPrevPressed =
@@ -228,16 +197,40 @@ bool WordSelectNavigator::handleNavigation(const MappedInputManager& input, cons
         input.wasReleased(frontNavSwapped ? MappedInputManager::Button::Right : MappedInputManager::Button::Left);
     wordPrevPressed = input.wasReleased(MappedInputManager::Button::Up);
     wordNextPressed = input.wasReleased(MappedInputManager::Button::Down);
+    wordPrevHeld = input.isPressed(MappedInputManager::Button::Up);
+    wordNextHeld = input.isPressed(MappedInputManager::Button::Down);
   } else if (isInverted) {
     rowPrevPressed = input.wasReleased(MappedInputManager::Button::Down);
     rowNextPressed = input.wasReleased(MappedInputManager::Button::Up);
     wordPrevPressed = input.wasReleased(MappedInputManager::Button::Right);
     wordNextPressed = input.wasReleased(MappedInputManager::Button::Left);
+    wordPrevHeld = input.isPressed(MappedInputManager::Button::Right);
+    wordNextHeld = input.isPressed(MappedInputManager::Button::Left);
   } else {
     rowPrevPressed = input.wasReleased(MappedInputManager::Button::Up);
     rowNextPressed = input.wasReleased(MappedInputManager::Button::Down);
     wordPrevPressed = input.wasReleased(MappedInputManager::Button::Left);
     wordNextPressed = input.wasReleased(MappedInputManager::Button::Right);
+    wordPrevHeld = input.isPressed(MappedInputManager::Button::Left);
+    wordNextHeld = input.isPressed(MappedInputManager::Button::Right);
+  }
+
+  const unsigned long now = millis();
+  const bool repeatDue = (wordPrevHeld || wordNextHeld) && input.getHeldTime() >= WORD_REPEAT_START_MS &&
+                         (!wordRepeatActive || now - lastWordRepeatTime >= WORD_REPEAT_INTERVAL_MS);
+  if (repeatDue) {
+    wordPrevPressed = wordPrevHeld;
+    wordNextPressed = wordNextHeld;
+    wordRepeatActive = true;
+    lastWordRepeatTime = now;
+  } else if (wordRepeatActive && (wordPrevPressed || wordNextPressed)) {
+    // A repeated hold already moved at the threshold; do not add one more
+    // step when that same button is released.
+    wordPrevPressed = false;
+    wordNextPressed = false;
+    wordRepeatActive = false;
+  } else if (!wordPrevHeld && !wordNextHeld) {
+    wordRepeatActive = false;
   }
 
   const int rowCount = static_cast<int>(rows.size());

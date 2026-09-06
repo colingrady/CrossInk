@@ -111,9 +111,9 @@ PHM_FALLBACK_RANGES=(
   0x91CA,0x91CA
 )
 
-READING_FONT_SIZES=(8 9 10 12 14 16 18 20)
+READING_FONT_SIZES=(10 12 14 16)
 READING_FONT_STYLES=("Regular" "Bold" "Italic" "BoldItalic")
-READING_FONT_RENDER_ARGS=(--2bit --compress --pnum --darken-aa)
+READING_FONT_RENDER_ARGS=(--2bit --compress --pnum --darken-aa --zopfli)
 
 font_include_args() {
   local face_index="$1"
@@ -163,7 +163,6 @@ generate_reading_fonts() {
   echo "Generating built-in reading fonts..."
   generate_family lexenddeca LexendDeca LexendDeca yes
   generate_family bitter Bitter Bitter yes
-  generate_family charein ChareInk7 ChareInk7 no
   echo ""
   echo "Built-in reading fonts complete."
   echo ""

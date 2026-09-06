@@ -231,7 +231,16 @@ void SdCardFont::applyKernLigaturePointers(PerStyle& s, EpdFontData& data, const
   // kern matrix is never resident — see PerStyle::miniKernMatrix comment.
   data.kernLeftClasses = includeKerning ? s.miniKernLeftClasses : nullptr;
   data.kernRightClasses = includeKerning ? s.miniKernRightClasses : nullptr;
+  // .cpfont files map packed class tables and a dense matrix. Explicitly clear
+  // the built-in-only representation because getKerning() selects by pointer.
+  data.kernLeftCodepoints = nullptr;
+  data.kernLeftClassIds = nullptr;
+  data.kernRightCodepoints = nullptr;
+  data.kernRightClassIds = nullptr;
   data.kernMatrix = includeKerning ? s.miniKernMatrix : nullptr;
+  data.kernRowOffsets = nullptr;
+  data.kernSparseCols = nullptr;
+  data.kernSparseValues = nullptr;
   data.kernLeftEntryCount = includeKerning ? s.miniKernLeftEntryCount : 0;
   data.kernRightEntryCount = includeKerning ? s.miniKernRightEntryCount : 0;
   data.kernLeftClassCount = includeKerning ? s.miniKernLeftClassCount : 0;
@@ -1583,8 +1592,6 @@ EpdFont* SdCardFont::getEpdFont(uint8_t style) {
   if (!styles_[style].present) return nullptr;
   return &styles_[style].epdFont;
 }
-
-bool SdCardFont::hasStyle(uint8_t style) const { return styles_[style & (MAX_STYLES - 1)].present; }
 
 uint8_t SdCardFont::resolveStyle(uint8_t style) const {
   static const uint8_t kFallbacks[MAX_STYLES][MAX_STYLES] = {

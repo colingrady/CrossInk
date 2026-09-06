@@ -88,7 +88,9 @@ void BaseTheme::drawBatteryLeft(const GfxRenderer& renderer, Rect rect, const bo
                                 const bool foregroundBlack) const {
   // Left aligned: icon on left, percentage on right (reader mode)
   const uint16_t percentage = powerManager.getBatteryPercentage();
-  const int y = rect.y + 6;
+  // The icon's nub makes its visual center sit slightly below its bounding
+  // box. Lift it one pixel to center it with the percentage text.
+  const int y = rect.y + 5;
 
   if (showPercentage) {
     const auto percentageText = std::to_string(percentage) + "%";
@@ -106,7 +108,7 @@ void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const b
   // Right aligned: percentage on left, icon on right (UI headers)
   // rect.x is already positioned for the icon (drawHeader calculated it)
   const uint16_t percentage = powerManager.getBatteryPercentage();
-  const int y = rect.y + 6;
+  const int y = rect.y + 5;
 
   if (showPercentage) {
     const auto percentageText = std::to_string(percentage) + "%";
@@ -896,18 +898,17 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   if (showProgress && (statusBar.showBookProgressPercent || statusBar.showChapterPageCount || showStablePageNumbers)) {
     // Right aligned text for progress counter
     char progressStr[48];
-    // Prefix the section page count with "~" while a still-building spine only yields an estimated total.
-    const char* estimatePrefix = pageCountEstimated ? "~" : "";
+    // Draw the estimate marker separately so it is legible on lower-PPI displays.
+    const bool showEstimate = pageCountEstimated && statusBar.showChapterPageCount;
 
     if (statusBar.showChapterPageCount && showStablePageNumbers && statusBar.showBookProgressPercent) {
-      snprintf(progressStr, sizeof(progressStr), "%s%d/%d  %d/%d  %.0f%%", estimatePrefix, currentPage, pageCount,
-               stableCurrentPage, stablePageCount, bookProgress);
+      snprintf(progressStr, sizeof(progressStr), "%d/%d  %d/%d  %.0f%%", currentPage, pageCount, stableCurrentPage,
+               stablePageCount, bookProgress);
     } else if (statusBar.showChapterPageCount && showStablePageNumbers) {
-      snprintf(progressStr, sizeof(progressStr), "%s%d/%d  %d/%d", estimatePrefix, currentPage, pageCount,
-               stableCurrentPage, stablePageCount);
+      snprintf(progressStr, sizeof(progressStr), "%d/%d  %d/%d", currentPage, pageCount, stableCurrentPage,
+               stablePageCount);
     } else if (statusBar.showChapterPageCount && statusBar.showBookProgressPercent) {
-      snprintf(progressStr, sizeof(progressStr), "%s%d/%d  %.0f%%", estimatePrefix, currentPage, pageCount,
-               bookProgress);
+      snprintf(progressStr, sizeof(progressStr), "%d/%d  %.0f%%", currentPage, pageCount, bookProgress);
     } else if (showStablePageNumbers && statusBar.showBookProgressPercent) {
       snprintf(progressStr, sizeof(progressStr), "%d/%d  %.0f%%", stableCurrentPage, stablePageCount, bookProgress);
     } else if (statusBar.showBookProgressPercent) {
@@ -915,14 +916,21 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     } else if (showStablePageNumbers) {
       snprintf(progressStr, sizeof(progressStr), "%d/%d", stableCurrentPage, stablePageCount);
     } else {
-      snprintf(progressStr, sizeof(progressStr), "%s%d/%d", estimatePrefix, currentPage, pageCount);
+      snprintf(progressStr, sizeof(progressStr), "%d/%d", currentPage, pageCount);
     }
 
     progressTextWidth = renderer.getTextWidth(SMALL_FONT_ID, progressStr);
-    renderer.drawText(
-        SMALL_FONT_ID,
-        renderer.getScreenWidth() - metrics.statusBarHorizontalMargin - orientedMarginRight - progressTextWidth, textY,
-        progressStr, foregroundBlack);
+    const int estimateWidth = showEstimate ? renderer.getTextWidth(UI_10_FONT_ID, "~") : 0;
+    constexpr int estimateGap = 2;
+    const int estimateSpacing = showEstimate ? estimateGap : 0;
+    const int progressX = renderer.getScreenWidth() - metrics.statusBarHorizontalMargin - orientedMarginRight -
+                          estimateWidth - estimateSpacing - progressTextWidth;
+    if (showEstimate) {
+      const int estimateY = textY + (renderer.getLineHeight(SMALL_FONT_ID) - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
+      renderer.drawText(UI_10_FONT_ID, progressX, estimateY, "~");
+    }
+    renderer.drawText(SMALL_FONT_ID, progressX + estimateWidth + estimateSpacing, textY, progressStr);
+    progressTextWidth += estimateWidth + estimateSpacing;
   }
 
   // Draw Progress Bar
@@ -1029,8 +1037,10 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
 }
 
 void BaseTheme::drawTopStatusBarClock(const GfxRenderer& renderer, int topY, const char* previewTime,
-                                      const bool readerContext, const int textYOffset, const bool darkMode) const {
-  if (!(readerContext ? SETTINGS.shouldShowClockInReader() : SETTINGS.shouldShowClockOutsideReader())) {
+                                      const bool readerContext, const int textYOffset, const bool darkMode,
+                                      const bool forceVisible) const {
+  if (!forceVisible &&
+      !(readerContext ? SETTINGS.shouldShowClockInReader() : SETTINGS.shouldShowClockOutsideReader())) {
     return;
   }
 
@@ -1095,7 +1105,8 @@ void BaseTheme::drawTextField(const GfxRenderer& renderer, Rect rect, const int 
 void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,
                                 int selectedIndex, const bool showConfirmationFooter, const char* cancelLabel,
                                 const char* saveLabel, const bool saveFocused, const int primaryOptionIndex,
-                                const char* noteLabel, const char* noteBody) const {
+                                const char* noteLabel, const char* noteBody, const std::vector<bool>& disabledOptions,
+                                const int firstOptionIndex) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
@@ -1169,7 +1180,9 @@ void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, 
   const int rowStep = rowHeight + itemSpacing;
   const int maxVisibleOptions = std::max(1, std::min(optionCount, (maxListHeight + itemSpacing) / rowStep));
   const int safeSelectedIndex = std::clamp(selectedIndex, 0, optionCount - 1);
-  const int visibleStart = std::clamp(safeSelectedIndex - maxVisibleOptions / 2, 0, optionCount - maxVisibleOptions);
+  const int centeredStart = std::clamp(safeSelectedIndex - maxVisibleOptions / 2, 0, optionCount - maxVisibleOptions);
+  const int visibleStart =
+      firstOptionIndex < 0 ? centeredStart : std::clamp(firstOptionIndex, 0, optionCount - maxVisibleOptions);
   const int visibleEnd = visibleStart + maxVisibleOptions;
   const int visibleCount = visibleEnd - visibleStart;
   const int listHeight = rowHeight * visibleCount + itemSpacing * (visibleCount - 1);
@@ -1275,11 +1288,14 @@ void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, 
       const int optionIndex = visibleStart + visibleIndex;
       const int itemY = y + visibleIndex * (rowHeight + itemSpacing);
       const bool selected = !saveFocused && optionIndex == safeSelectedIndex;
+      const bool disabled = optionIndex < static_cast<int>(disabledOptions.size()) && disabledOptions[optionIndex];
       const char* labelText = options[optionIndex].c_str();
 
-      if (metrics.optionPopupDrawAllRows || selected) {
+      if (metrics.optionPopupDrawAllRows || selected || disabled) {
         Color rowColor;
-        if (selected) {
+        if (disabled) {
+          rowColor = Color::LightGray;
+        } else if (selected) {
           rowColor = metrics.optionPopupSelectionLight ? Color::LightGray : Color::Black;
         } else {
           rowColor = Color::White;
@@ -1298,7 +1314,7 @@ void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, 
       // Unselected items: text is dark (invert=true means draw on white bg).
       // Selected on dark bg: text must be white (invert=false).
       // Selected on light bg: text stays dark (invert=true).
-      const bool invertText = selected ? metrics.optionPopupSelectionLight : true;
+      const bool invertText = disabled || (selected ? metrics.optionPopupSelectionLight : true);
       renderer.drawText(optionFontId, textX, textY, labelText, invertText, style);
     }
   }

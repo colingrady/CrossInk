@@ -9,32 +9,37 @@ fixed-size char buffer.
 
 ### Version 1
 
-Sleep screens keep a compact, rebuildable index for the selected sleep-image
-folder. The index avoids walking the directory during every sleep while using
-only one fixed-size record at a time in RAM. `bmp` contains BMP files and
-`all` contains BMP and PNG files for Page Overlay mode. The `validated` header
-flag means BMP headers were checked while rebuilding after a failed render.
+`ImageFolderIndex` (`src/activities/boot_sleep/ImageFolderIndex.{h,cpp}`) keeps
+a compact, rebuildable index per indexed folder. It backs both the sleep-image
+folder and the boot-screen folder (`/bootscreen` or `/.bootscreen`); the
+directory name predates the boot-screen use and was kept as-is so existing
+sleep caches aren't orphaned by an unrelated rename. The index avoids walking
+a folder on every selection while using only one fixed-size record at a time
+in RAM. `bmp` contains BMP files and `all` contains BMP and PNG files (sleep's
+Page Overlay mode only; the boot screen is BMP-only and always uses a `bmp`
+index). The `validated` header flag means BMP headers were checked while
+rebuilding after a failed render.
 
 The index is disposable: a missing, malformed, or stale selected entry causes
-one rebuild and then the sleep renderer falls back to its directory scan. File
+one rebuild and then the caller falls back to its directory scan. File
 transfer, file-browser, and preferred-folder changes invalidate affected
-indexes. Files added or changed directly on the SD card have no notification
-path; they are picked up when a cached entry is found missing or when an index
-is otherwise rebuilt.
+indexes via `ImageFolderIndex::invalidateForPath()`. Files added or changed
+directly on the SD card have no notification path; they are picked up when a
+cached entry is found missing or when an index is otherwise rebuilt.
 
 ```c++
-struct SleepImageIndexHeader {
+struct ImageFolderIndexHeader {
     char magic[4];       // "CSIX"
     u8 version;          // 1
     u8 flags;            // bit 0: BMP+PNG, bit 1: BMP headers validated
     u16 pathLength;
     u16 recordCount;
-    u16 recordSize;      // sizeof(SleepImageIndexRecord)
+    u16 recordSize;      // sizeof(ImageFolderIndexRecord)
     u32 recordsOffset;   // sizeof(header) + pathLength
     char directory[pathLength];
 };
 
-struct SleepImageIndexRecord {
+struct ImageFolderIndexRecord {
     u16 nameLength;
     u8 flags;             // bit 0: PNG (otherwise BMP)
     u8 reserved;
@@ -131,7 +136,7 @@ if (parsedSize != fileSize) {
 
 ## `reader_settings.bin`
 
-### Version 5
+### Version 9
 
 Each EPUB cache directory may contain `reader_settings.bin`. Missing files mean
 the book uses global Reader settings and the default auto-page-turn interval.
@@ -145,7 +150,10 @@ Version 2 stores flags before the full reader-settings snapshot. Version 3 adds
 the EPUB word-spacing level to that snapshot. Version 4 adds the EPUB indexing
 method (`0` = incremental, `1` = full section). Version 5 appends a per-book
 dictionary SD-font family name. Version 6 stores reader font sizes as physical
-point sizes, and version 7 appends the dictionary font's selected point size.
+point sizes, version 7 appends the dictionary font's selected point size, and
+version 8 splits the screen margin into vertical and horizontal values. Version
+9 removes the obsolete per-book Dark Mode byte: Dark Mode is now a global
+display setting.
 This lets the
 file preserve an auto-page-turn interval without forcing custom font/layout
 settings for the book. It also stores a per-book EPUB render mode override,
@@ -157,7 +165,7 @@ fallback successfully opens a difficult book.
 
 ```c++
 struct ReaderSettingsBin {
-    u8 version; // 7
+    u8 version; // 9
     u8 flags;   // bit 0 = custom reader settings, bit 1 = custom auto-page-turn interval, bit 2 = render mode override, bit 3 = dictionary font override
     u16 autoPageTurnSeconds;
     u8 renderMode; // 0 = CrossInk Default, 1 = Balanced, 2 = Light
@@ -167,13 +175,13 @@ struct ReaderSettingsBin {
     u8 lineHeightPercent;
     u8 wordSpacing; // 0 = natural font spacing; 1-4 widen each gap by ~75% per level
     u8 orientation;
-    u8 screenMargin;
+    u8 screenMarginVertical;
+    u8 screenMarginHorizontal;
     u8 publisherPageNumbers;
     u8 paragraphAlignment;
     u8 embeddedStyle;
     u8 hyphenationEnabled;
     u8 textAntiAliasing;
-    u8 readerDarkMode;
     u8 imageRendering;
     u8 extraParagraphSpacing;
     u8 forceParagraphIndents;
@@ -293,6 +301,21 @@ Binary layout:
 - `[69-72]` `estimatedTimeLeftSeconds` (`uint32_t` LE, `0` means unavailable)
 
 ## `section.bin`
+
+### Version 66
+
+Version 66 keeps the version 63 serialized layout unchanged. It was bumped
+because internal EPUB links now preserve CSS superscript and subscript styles,
+changing their cached word-style flags and page layout. Complete files use
+version byte `66`, and suspended partials use sentinel byte `0xF6`.
+
+### Version 62
+
+Version 62 stores one compact source-whitespace bit per word in serialized text
+blocks. Touch reader previews use it to reflow words with the selected font
+without inferring spaces from device-specific pixel advances. Full and
+suspended section caches rebuild together; complete files use version byte
+`62`, and suspended partials use sentinel byte `0xF8`.
 
 ### Version 61
 

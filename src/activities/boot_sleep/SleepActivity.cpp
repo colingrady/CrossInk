@@ -1,9 +1,11 @@
 #include "SleepActivity.h"
 
+#include <BoardConfig.h>
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
+#include <HalDisplay.h>
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -11,6 +13,7 @@
 #include <Xtc.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <new>
 #include <string_view>
@@ -21,12 +24,13 @@
 #include "../reader/EpubReaderUtils.h"
 #include "../reader/TxtReaderActivity.h"
 #include "../reader/XtcReaderActivity.h"
+#include "AppCapabilities.h"
 #include "AppVersion.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "ImageFolderIndex.h"
 #include "RecentBooksStore.h"
 #include "SleepCoverAssets.h"
-#include "SleepImageIndex.h"
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "components/themes/dashboard/DashboardTheme.h"
@@ -379,10 +383,11 @@ bool selectRandomSleepImage(SleepImageMode mode, SleepImageSelection& selection,
   if (!resolvePreferredSleepDirectory(sleepDir)) return false;
 
   const bool allowPng = mode == SleepImageMode::Overlay && !bmpOnly;
-  SleepImageIndex::Selection indexedSelection;
-  if (SleepImageIndex::select(sleepDir, allowPng, validateBmpHeaders, APP_STATE,
-                              std::min(APP_STATE.recentSleepFill, CrossPointState::SLEEP_RECENT_COUNT),
-                              indexedSelection)) {
+  ImageFolderIndex::Selection indexedSelection;
+  if (ImageFolderIndex::select(sleepDir, allowPng, validateBmpHeaders, APP_STATE.recentSleepImages,
+                               CrossPointState::SLEEP_RECENT_COUNT, APP_STATE.recentSleepPos, APP_STATE.recentSleepFill,
+                               std::min(APP_STATE.recentSleepFill, CrossPointState::SLEEP_RECENT_COUNT),
+                               indexedSelection)) {
     selection.path = std::move(indexedSelection.path);
     selection.isPng = indexedSelection.isPng;
     APP_STATE.pushRecentSleep(indexedSelection.index);
@@ -488,11 +493,15 @@ bool selectRandomSleepImage(SleepImageMode mode, SleepImageSelection& selection,
 
 void SleepActivity::onEnter() {
   Activity::onEnter();
-
   const bool renderQuickResume =
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
       (fromTimeout &&
        SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
+
+  // Sleep screens draw directly, outside ActivityManager's normal render path.
+  // Quick Resume retains the current screen, so preserve its Night Mode output;
+  // generated sleep screens continue to use their normal polarity.
+  display.setInverted(renderQuickResume && SETTINGS.screenInverted != 0);
 
   if (renderQuickResume) {
     return renderLastScreenSleepScreen();
@@ -511,13 +520,19 @@ void SleepActivity::onEnter() {
   overlayBackgroundBufferStored =
       sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY && renderer.storeBwBuffer();
 
+  // X4 Pro and X4 Classic share a panel that can retain this high-contrast
+  // transient update beneath the final OEM-style sleep refresh. Render only
+  // the final sleep frame on that panel family.
+  const bool showSleepPopup = !BoardConfig::isX4Pro() && !CROSSINK_APP_DEVICE_X4CLASSIC;
   // Show the popup in the orientation that was visible before reader exit restores
   // global settings. Reset to portrait afterwards so sleep screen layout stays unchanged.
   if (APP_STATE.lastSleepFromReader) {
-    renderer.setOrientation(sleepPopupOrientation);
-    GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
+    if (showSleepPopup) {
+      renderer.setOrientation(sleepPopupOrientation);
+      GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
+    }
     renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-  } else {
+  } else if (showSleepPopup) {
     GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
   }
 
@@ -633,11 +648,22 @@ void SleepActivity::renderDefaultSleepScreen() const {
   renderer.displayBuffer(HalDisplay::HALF_REFRESH, TURN_OFF_SCREEN_AFTER_SLEEP_REFRESH);
 }
 
-void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
+void SleepActivity::renderBitmapSleepScreen(Bitmap& bitmap) const {
   int x, y;
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
   float cropX = 0, cropY = 0;
+
+  // Keep error diffusion on the screen-sized grid. Resampling an already
+  // dithered source makes the source pattern alias into regular seams.
+  if (SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::FIT &&
+      (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight)) {
+    const float scale = std::min(static_cast<float>(pageWidth) / bitmap.getWidth(),
+                                 static_cast<float>(pageHeight) / bitmap.getHeight());
+    const int targetWidth = static_cast<int>(std::floor((bitmap.getWidth() - 1) * scale)) + 1;
+    const int targetHeight = static_cast<int>(std::floor((bitmap.getHeight() - 1) * scale)) + 1;
+    bitmap.setDitheredOutputSize(targetWidth, targetHeight);
+  }
 
   if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
     // image will scale, make sure placement is right

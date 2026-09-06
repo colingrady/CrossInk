@@ -37,6 +37,9 @@ class FileBrowserActivity final : public Activity {
   void clearPreferredSleepFolder();
   bool isPreferredSleepFolder(const std::string& fullPath) const;
   bool isSleepFavoriteFolder(const std::string& fullPath) const;
+  void pinBootFavorite(const std::string& fullPath);
+  void unpinBootFavorite();
+  bool isPinnedBootFavorite(const std::string& fullPath) const;
   void showFileActionMenu(const std::string& entry, bool ignoreInitialConfirmRelease = false);
 
   ButtonNavigator buttonNavigator;
@@ -83,9 +86,11 @@ class FileBrowserActivity final : public Activity {
 
   static void listScreen(UiApp::ScreenType& screen, void* user);
   static void onRowEvent(const freeink::ui::ActionEvent& event, void* user);
+  static void onSettingsEvent(const freeink::ui::ActionEvent& event, void* user);
   void buildListScreen(UiApp::ScreenType& screen);
   void activateSelected();
   void navigateBack();
+  void openSettings();
 
   // Data loading
   void clearIndexNameCache();

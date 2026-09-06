@@ -14,6 +14,7 @@
 #include <cmath>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "Epub/Section.h"
 #include "EpubReaderUtils.h"
 #include "HalClock.h"
@@ -219,6 +220,9 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
     returnToReader();
     return;
   }
+
+  WiFi.setSleep(false);
+  LOG_DBG("KOSync", "WiFi sleep disabled for sync");
 
   sdFontSystem.releaseForNetwork(renderer);
 
@@ -573,16 +577,35 @@ void KOReaderSyncActivity::performUpload() {
 void KOReaderSyncActivity::onEnter() {
   Activity::onEnter();
 
+  // Sync is a reader-originated activity, but its decision prompts are not
+  // reader content. Keep their touch actions available even when the reader's
+  // tap controls are disabled.
+  if (mappedInput.hasTouchHardware()) {
+    mappedInput.setReaderTouchscreenOverride(true);
+    touchOverrideActive = true;
+  }
+
   // The reader uses this activity as a tiny handoff so ActivityManager can run
   // reader onExit() before rebooting. Network boot uses the other constructor.
   if (restartBeforeNetwork) {
-    silentRestartToNetwork(NetworkBootTarget::KOREADER_SYNC);
+    const bool hasReaderOrientation = readerOrientation < CrossPointSettings::ORIENTATION_COUNT;
+    if (hasReaderOrientation) ReaderUtils::applyOrientation(renderer, readerOrientation);
+    // Zero means no reader override; valid orientations are encoded one-based.
+    const uint32_t orientationPayload = hasReaderOrientation ? static_cast<uint32_t>(readerOrientation) + 1 : 0;
+    silentRestartToNetwork(NetworkBootTarget::KOREADER_SYNC, orientationPayload);
     return;
   }
 
   LOG_INF("KOSync", "network entry free=%u maxAlloc=%u stack=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
           static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
-  ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+  uint8_t syncOrientation =
+      readerOrientation < CrossPointSettings::ORIENTATION_COUNT ? readerOrientation : SETTINGS.orientation;
+  const PendingOverlayResume& resume = APP_STATE.pendingOverlayResume;
+  if (resume.origin == PendingOverlayOrigin::Reader && resume.overlay == PendingOverlayType::FrontlightDrawer &&
+      resume.preserveReaderOrientation && resume.readerOrientation < CrossPointSettings::ORIENTATION_COUNT) {
+    syncOrientation = resume.readerOrientation;
+  }
+  ReaderUtils::applyOrientation(renderer, syncOrientation);
   lockInitialConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
 
   if (!localProgressDeferred && !localProgress.valid) {
@@ -618,11 +641,15 @@ void KOReaderSyncActivity::onEnter() {
 }
 
 void KOReaderSyncActivity::onExit() {
+  if (touchOverrideActive) {
+    mappedInput.setReaderTouchscreenOverride(false);
+    touchOverrideActive = false;
+  }
   Activity::onExit();
 
   if (wifiActivated) {
     wifiOff();
-    silentRestartToReader(true);
+    silentRestartToReaderAfterNetwork(true);
   }
 }
 
@@ -702,9 +729,9 @@ void KOReaderSyncActivity::render(RenderLock&&) {
                       localPageStr);
 
     const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-    const auto actions = resultActionLayout(screen, metrics, top, lineHeight, mappedInput.hasTouch());
+    const auto actions = resultActionLayout(screen, metrics, top, lineHeight, mappedInput.hasTouchHardware());
     const char* actionLabels[] = {tr(STR_APPLY_REMOTE), tr(STR_UPLOAD_LOCAL)};
-    if (mappedInput.hasTouch()) {
+    if (mappedInput.hasTouchHardware()) {
       TouchActionButtons::draw(renderer, actions.touchLayout, actionLabels, selectedOption, selectedOption,
                                UI_10_FONT_ID);
     } else {
@@ -811,8 +838,8 @@ void KOReaderSyncActivity::loop() {
       const Rect screen = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
       const int top =
           screen.y + metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + metrics.verticalSpacing;
-      const auto actions =
-          resultActionLayout(screen, metrics, top, renderer.getLineHeight(UI_10_FONT_ID), mappedInput.hasTouch());
+      const auto actions = resultActionLayout(screen, metrics, top, renderer.getLineHeight(UI_10_FONT_ID),
+                                              mappedInput.hasTouchHardware());
       int touchedOption = -1;
       const auto touch =
           mappedInput.rowTouch(touchedOption, actions.buttons[0].y, actions.rowStep, 2, actions.buttons[0].x,

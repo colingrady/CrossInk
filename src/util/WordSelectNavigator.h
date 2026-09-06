@@ -17,12 +17,6 @@ static inline bool utf8EndsWithHyphen(const char* text, const uint16_t len) {
   return text != nullptr && len > 0 && text[len - 1] == '-';
 }
 
-static inline void utf8RemoveTrailingHyphen(std::string& text) {
-  if (!text.empty() && text.back() == '-') {
-    text.pop_back();
-  }
-}
-
 // Orientation-aware word-selection navigator.
 // Holds a flat list of on-screen words organised into rows and tracks the
 // currently highlighted word.  handleNavigation() processes directional input;
@@ -51,16 +45,19 @@ class WordSelectNavigator {
     EpdFontFamily::Style style = EpdFontFamily::REGULAR;
     bool isIpa = false;
     int fontId = 0;  // resolved at extraction time; used by renderHighlight()
-    // Pack the two display/lookup flags into the byte that already preceded
+    // Pack the display/lookup flags into the byte that already preceded
     // bionicBoundary so WordInfo remains 36 bytes on 32-bit targets.
     bool isRtl : 1;
     // The source layout placed this token directly beside the previous
     // selectable token without whitespace (for example adjacent CJK glyphs).
     bool joinWithoutSpaceBefore : 1;
+    // Table rows interleave cells in visual order, so their line endings must
+    // not participate in the body-text hyphen continuation heuristic.
+    bool isTableText : 1;
     uint8_t bionicBoundary = 0;
     uint16_t bionicSuffixX = 0;
 
-    WordInfo() : isRtl(false), joinWithoutSpaceBefore(false) {}
+    WordInfo() : isRtl(false), joinWithoutSpaceBefore(false), isTableText(false) {}
   };
 
   struct Row {
@@ -101,14 +98,6 @@ class WordSelectNavigator {
   // Sets each word's row field and populates the rows vector.
   static void organizeIntoRows(std::vector<WordInfo>& words, std::vector<Row>& rows);
 
-  // Link the last word of each row that ends with a trailing hyphen to the
-  // first word of the next row, marking them as a compound pair via
-  // continuationIndex / continuationOf. Also stores a merged lookup text
-  // (hyphen stripped) shared by both halves for dictionary lookup.
-  // Words whose text both starts and ends with '-' (e.g. -re-) are standalone
-  // affix tokens and are skipped — they are not compound-word first halves.
-  static void mergeHyphenatedPairs(std::vector<WordInfo>& words, const std::vector<Row>& rows, std::string& textPool);
-
   // Append a null-terminated string to a text pool. Returns the offset.
   // Uses manual linear +256 growth to avoid std::string doubling.
   static uint16_t poolAppend(std::string& pool, const char* s, size_t len);
@@ -124,11 +113,6 @@ class WordSelectNavigator {
 
   // Currently highlighted word. nullptr if the word list is empty.
   const WordInfo* getSelected() const;
-
-  // The paired half of the selected hyphenated word (EPUB use only).
-  // When on the first half returns the second half; when on the second half returns the first.
-  // Returns nullptr when the selected word has no paired half.
-  const WordInfo* getPairedHalf() const;
 
   bool isEmpty() const { return words.empty(); }
 
@@ -309,6 +293,8 @@ class WordSelectNavigator {
   int completedSelectionStart = -1;
   int completedSelectionEnd = -1;
   bool touchDragCursorVisible = false;
+  unsigned long lastWordRepeatTime = 0;
+  bool wordRepeatActive = false;
 
   int findClosestWord(int targetRow) const;
   int findClosestWordFromX(int targetRow, int refCenterX) const;

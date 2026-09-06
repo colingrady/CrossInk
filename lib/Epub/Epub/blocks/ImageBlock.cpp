@@ -30,8 +30,6 @@ void ImageBlock::setExtractor(void* context, ExtractFn fn) {
   extractFn = fn;
 }
 
-bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str()); }
-
 namespace {
 
 std::string getCachePath(const std::string& imagePath) {
@@ -395,6 +393,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   // Try to render from cache first
   std::string cachePath = getCachePath(imagePath);
   if (renderFromCache(renderer, cachePath, x, y, width, height)) {
+    renderer.preserveImagePolarity(x, y, width, height);
     return;  // Successfully rendered from cache
   }
 
@@ -451,6 +450,8 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
     renderPlaceholder(renderer, x, y, foregroundBlack);
     return;
   }
+
+  renderer.preserveImagePolarity(x, y, width, height);
 }
 
 bool ImageBlock::serialize(FsFile& file) {

@@ -1,6 +1,7 @@
 #include "FileBrowserActivity.h"
 
 #include <Arduino.h>
+#include <FreeInkUIIcon.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -17,8 +18,9 @@
 #include "CrossPointState.h"
 #include "FileBrowserActionActivity.h"
 #include "MappedInputManager.h"
-#include "activities/boot_sleep/SleepImageIndex.h"
+#include "activities/boot_sleep/ImageFolderIndex.h"
 #include "activities/reader/EpubReaderActivity.h"
+#include "activities/settings/SettingsActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/OptionSelectionActivity.h"
 #include "components/CompactHeader.h"
@@ -26,6 +28,7 @@
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
+#include "components/icons/listIcons.h"
 #include "components/themes/minimal/MinimalTheme.h"
 #include "fontIds.h"
 
@@ -37,6 +40,7 @@ constexpr unsigned long COMPLETED_FEEDBACK_MS = 1000;
 constexpr int ROOT_HINT_GAP = 20;
 constexpr size_t NAME_BUFFER_SIZE = 500;
 constexpr fui::ActionId ACTION_ROW = 1;
+constexpr fui::ActionId ACTION_SETTINGS = 2;
 constexpr size_t INDEX_THRESHOLD = 200;
 constexpr size_t MAX_VIRTUAL_LIST_ENTRIES = static_cast<size_t>(std::numeric_limits<int16_t>::max());
 constexpr uint32_t FILE_BROWSER_APPEND_MIN_FREE_AFTER_ALLOC = 48U * 1024U;
@@ -63,6 +67,9 @@ bool isDefaultSleepFolderPath(const std::string& path) {
 bool isSleepImageFile(const std::string& path) {
   return FsHelpers::hasBmpExtension(path) || FsHelpers::hasPngExtension(path);
 }
+
+// Boot screens draw directly with no PNG-overlay path, so only BMP is pinnable.
+bool isBootImageFile(const std::string& path) { return FsHelpers::hasBmpExtension(path); }
 
 bool isMacOSMetadataEntry(std::string_view filename) {
   return filename.rfind("._", 0) == 0 || filename == ".DS_Store" || filename == ".Spotlight-V100" ||
@@ -398,6 +405,7 @@ void FileBrowserActivity::onEnter() {
   listNav.visibleRows = visibleRows;
   applySharedUiTheme(app, uiTarget);
   app.on(ACTION_ROW, &FileBrowserActivity::onRowEvent, this);
+  app.on(ACTION_SETTINGS, &FileBrowserActivity::onSettingsEvent, this);
   app.setScreen(&FileBrowserActivity::listScreen, this);
   requestUpdate();
 }
@@ -423,10 +431,13 @@ void FileBrowserActivity::promptDeleteFile(const std::string& fullPath, const st
       LOG_ERR("FileBrowser", "Failed to delete file: %s", fullPath.c_str());
       return;
     }
-    SleepImageIndex::invalidateForPath(fullPath.c_str());
+    ImageFolderIndex::invalidateForPath(fullPath.c_str());
 
     if (isPinnedSleepFavorite(fullPath)) {
       unpinSleepFavorite();
+    }
+    if (isPinnedBootFavorite(fullPath)) {
+      unpinBootFavorite();
     }
 
     {
@@ -463,7 +474,7 @@ void FileBrowserActivity::promptDeleteDirectory(const std::string& fullPath, con
       LOG_ERR("FileBrowser", "Failed to delete directory: %s", dirPath.c_str());
       return;
     }
-    SleepImageIndex::invalidateForPath(dirPath.c_str());
+    ImageFolderIndex::invalidateForPath(dirPath.c_str());
 
     for (const auto& metadataPath : metadataPaths) {
       BookActions::clearFileMetadata(metadataPath);
@@ -472,6 +483,9 @@ void FileBrowserActivity::promptDeleteDirectory(const std::string& fullPath, con
     const std::string favoritePrefix = dirPath + "/";
     if (!APP_STATE.favoriteSleepImagePath.empty() && APP_STATE.favoriteSleepImagePath.rfind(favoritePrefix, 0) == 0) {
       unpinSleepFavorite();
+    }
+    if (!APP_STATE.favoriteBootImagePath.empty() && APP_STATE.favoriteBootImagePath.rfind(favoritePrefix, 0) == 0) {
+      unpinBootFavorite();
     }
     if (isPreferredSleepFolder(dirPath)) {
       clearPreferredSleepFolder();
@@ -530,6 +544,8 @@ void FileBrowserActivity::showDirectoryActionMenu(const std::string& entry, bool
                              case FileBrowserAction::RemoveFromRecents:
                              case FileBrowserAction::PinFavorite:
                              case FileBrowserAction::UnpinFavorite:
+                             case FileBrowserAction::PinBootFavorite:
+                             case FileBrowserAction::UnpinBootFavorite:
                              case FileBrowserAction::ViewBookmarks:
                              case FileBrowserAction::ViewClippings:
                              case FileBrowserAction::DeleteBookmarks:
@@ -580,7 +596,7 @@ void FileBrowserActivity::setPreferredSleepFolder(const std::string& fullPath) {
 
   APP_STATE.preferredSleepFolderPath = nextPath;
   APP_STATE.clearRecentSleepHistory();
-  SleepImageIndex::invalidate();
+  ImageFolderIndex::invalidate();
   if (!APP_STATE.saveToFile()) {
     LOG_ERR("FileBrowser", "Failed to save preferred sleep folder path: %s", normalizedPath.c_str());
     return;
@@ -597,7 +613,7 @@ void FileBrowserActivity::clearPreferredSleepFolder() {
 
   APP_STATE.preferredSleepFolderPath.clear();
   APP_STATE.clearRecentSleepHistory();
-  SleepImageIndex::invalidate();
+  ImageFolderIndex::invalidate();
   if (!APP_STATE.saveToFile()) {
     LOG_ERR("FileBrowser", "Failed to clear preferred sleep folder path");
     return;
@@ -615,6 +631,34 @@ bool FileBrowserActivity::isSleepFavoriteFolder(const std::string& fullPath) con
   return isDefaultSleepFolderPath(normalizedPath) || isPreferredSleepFolder(normalizedPath);
 }
 
+void FileBrowserActivity::pinBootFavorite(const std::string& fullPath) {
+  APP_STATE.favoriteBootImagePath = fullPath;
+  if (!APP_STATE.saveToFile()) {
+    LOG_ERR("FileBrowser", "Failed to save favorite boot image path: %s", fullPath.c_str());
+    return;
+  }
+  LOG_INF("FileBrowser", "Pinned favorite boot image: %s", fullPath.c_str());
+  requestUpdate();
+}
+
+void FileBrowserActivity::unpinBootFavorite() {
+  if (APP_STATE.favoriteBootImagePath.empty()) {
+    return;
+  }
+
+  APP_STATE.favoriteBootImagePath.clear();
+  if (!APP_STATE.saveToFile()) {
+    LOG_ERR("FileBrowser", "Failed to clear favorite boot image path");
+    return;
+  }
+  LOG_INF("FileBrowser", "Cleared favorite boot image");
+  requestUpdate();
+}
+
+bool FileBrowserActivity::isPinnedBootFavorite(const std::string& fullPath) const {
+  return APP_STATE.favoriteBootImagePath == fullPath;
+}
+
 void FileBrowserActivity::showFileActionMenu(const std::string& entry, bool ignoreInitialConfirmRelease) {
   const std::string fullPath = buildFullPath(basepath, entry);
   std::vector<FileBrowserActionActivity::MenuItem> items = BookActions::buildBookActionItems(fullPath, false);
@@ -628,6 +672,13 @@ void FileBrowserActivity::showFileActionMenu(const std::string& entry, bool igno
     items.push_back(
         {isPinnedSleepFavorite(fullPath) ? FileBrowserAction::UnpinFavorite : FileBrowserAction::PinFavorite,
          isPinnedSleepFavorite(fullPath) ? StrId::STR_UNPIN_AS_FAVORITE : StrId::STR_PIN_AS_FAVORITE});
+  }
+
+  const bool canPinBootFavorite = isBootImageFile(entry);
+  if (canPinBootFavorite) {
+    items.push_back(
+        {isPinnedBootFavorite(fullPath) ? FileBrowserAction::UnpinBootFavorite : FileBrowserAction::PinBootFavorite,
+         isPinnedBootFavorite(fullPath) ? StrId::STR_CLEAR_BOOT_SCREEN : StrId::STR_SET_AS_BOOT_SCREEN});
   }
 
   startActivityForResult(
@@ -745,6 +796,12 @@ void FileBrowserActivity::showFileActionMenu(const std::string& entry, bool igno
           case FileBrowserAction::UnpinFavorite:
             unpinSleepFavorite();
             return;
+          case FileBrowserAction::PinBootFavorite:
+            pinBootFavorite(fullPath);
+            return;
+          case FileBrowserAction::UnpinBootFavorite:
+            unpinBootFavorite();
+            return;
           case FileBrowserAction::SetSleepFolder:
           case FileBrowserAction::ClearSleepFolder:
           case FileBrowserAction::RemoveFromRecents:
@@ -805,6 +862,39 @@ void FileBrowserActivity::onRowEvent(const fui::ActionEvent& event, void* user) 
   // row on the next list.
   self->app.clearTapFlash();
   self->activateSelected();
+}
+
+void FileBrowserActivity::onSettingsEvent(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<FileBrowserActivity*>(user);
+  if (self->mode != Mode::Books || !self->mappedInput.hasTouchHardware()) return;
+  self->app.clearTapFlash();
+  self->openSettings();
+}
+
+void FileBrowserActivity::openSettings() {
+  const std::string selectedEntry =
+      entryCount() > 0 && selectorIndex < entryCount() ? entryNameAt(selectorIndex) : std::string();
+  startActivityForResult(
+      std::make_unique<SettingsActivity>(renderer, mappedInput, false, true, SettingsActivity::View::FileBrowser),
+      [this, selectedEntry](const ActivityResult&) {
+        {
+          RenderLock lock(*this);
+          if (!SETTINGS.showHiddenFiles && containsHiddenPathSegment(basepath)) {
+            basepath = "/";
+          }
+          loadFilesLocked();
+          selectorIndex = selectedEntry.empty() ? 0 : findEntry(selectedEntry);
+          if (entryCount() > 0 && selectorIndex >= entryCount()) {
+            selectorIndex = entryCount() - 1;
+          }
+          topIndex =
+              followListSelection(static_cast<int>(selectorIndex), 0, visibleRows, static_cast<int>(entryCount()));
+          listNav.reset(static_cast<int>(selectorIndex));
+          listNav.top = topIndex;
+          listNav.visibleRows = visibleRows;
+        }
+        requestUpdate();
+      });
 }
 
 void FileBrowserActivity::activateSelected() {
@@ -961,7 +1051,10 @@ void FileBrowserActivity::loop() {
         listNav.selected = static_cast<int>(selectorIndex);
         listNav.top = topIndex;
         listNav.visibleRows = visibleRows;
-        moved = listNav.scrollBy(delta, listSize);
+        // Page by the measured rows, like the button navigation below: with
+        // wrapped rows the fixed-height estimate skips entries.
+        const int page = listNav.pageRowsFor(listSize);
+        moved = listNav.scrollBy(swipe == MappedInputManager::SwipeDir::Up ? page : -page, listSize);
         topIndex = listNav.top;
       }
     }
@@ -1000,7 +1093,7 @@ void FileBrowserActivity::loop() {
       RenderLock lock(*this);
       nextIndex = ButtonNavigator::nextPageIndex(
           static_cast<int>(selectorIndex), listSize,
-          static_cast<size_t>(listSize) > MAX_VIRTUAL_LIST_ENTRIES ? visibleRows : listNav.pageRows());
+          static_cast<size_t>(listSize) > MAX_VIRTUAL_LIST_ENTRIES ? visibleRows : listNav.pageRowsFor(listSize));
     }
     moveSelection(nextIndex);
   };
@@ -1010,7 +1103,7 @@ void FileBrowserActivity::loop() {
       RenderLock lock(*this);
       previousIndex = ButtonNavigator::previousPageIndex(
           static_cast<int>(selectorIndex), listSize,
-          static_cast<size_t>(listSize) > MAX_VIRTUAL_LIST_ENTRIES ? visibleRows : listNav.pageRows());
+          static_cast<size_t>(listSize) > MAX_VIRTUAL_LIST_ENTRIES ? visibleRows : listNav.pageRowsFor(listSize));
     }
     moveSelection(previousIndex);
   };
@@ -1091,6 +1184,26 @@ void FileBrowserActivity::buildListScreen(UiApp::ScreenType& screen) {
   screen.setContentMargin(
       fui::Insets{static_cast<int16_t>(metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput)), 0,
                   static_cast<int16_t>(metrics.buttonHintsHeight), 0});
+
+  if (mode == Mode::Books && mappedInput.hasTouchHardware()) {
+    const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInput);
+    const auto backLayout = TouchHeaderBackButton::layout(header);
+    const fui::Rect settingsRect{static_cast<int16_t>(header.x + header.width - backLayout.iconRect.width),
+                                 static_cast<int16_t>(backLayout.iconRect.y),
+                                 static_cast<int16_t>(backLayout.iconRect.width),
+                                 static_cast<int16_t>(backLayout.iconRect.height)};
+    fui::ButtonProps settings;
+    settings.action = ACTION_SETTINGS;
+    settings.styles = fui::plainStyles(fui::Paint::solid(fui::Color::Black));
+    settings.minTouchSize = screen.theme().minTouchSize;
+    screen.button(settings, settingsRect);
+    const auto icon = fui::bitmapFromIcon(icon_sliders_horizontal_24);
+    const int16_t iconX = static_cast<int16_t>(settingsRect.x + (settingsRect.width - icon.width) / 2);
+    const int16_t iconY = static_cast<int16_t>(backLayout.iconRect.y + TouchHeaderBackButton::TITLE_VERTICAL_OFFSET +
+                                               (backLayout.iconRect.height - icon.height) / 2);
+    screen.target().bitmap(fui::Rect{iconX, iconY, icon.width, icon.height}, icon, fui::BitmapMode::Center,
+                           fui::Paint::solid(fui::Color::Black));
+  }
   screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 
   // Full path band at the bottom: separator on top, left-truncated so the
@@ -1205,7 +1318,11 @@ void FileBrowserActivity::buildListScreen(UiApp::ScreenType& screen) {
   props.partialTrailingRow = false;
   screen.list(props);
   if (usesVirtualList) topIndex = listNav.top;
-  fui::drawListScrollIndicator(screen.target(), listRect, totalEntries, visibleRows, topIndex,
+  // The nav path knows how many rows the layout actually fits; the local
+  // window path has only the fixed-height estimate.
+  const auto indicatorRows =
+      static_cast<uint16_t>(usesVirtualList ? listNav.pageRowsFor(static_cast<int>(totalEntries)) : visibleRows);
+  fui::drawListScrollIndicator(screen.target(), listRect, totalEntries, indicatorRows, topIndex,
                                screen.theme().listScrollWidth, screen.theme().listScrollSide,
                                screen.theme().listScrollInset);
 }
@@ -1226,7 +1343,8 @@ void FileBrowserActivity::render(RenderLock&&) {
   // indicator; the rest of the screen renders through the app.
   const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInput);
   if (mappedInput.hasTouchHardware()) {
-    TouchHeaderBackButton::draw(renderer, uiTarget, header, folderName.c_str(), false);
+    const int rightReserve = mode == Mode::Books ? TouchHeaderBackButton::layout(header).iconRect.width + 8 : 0;
+    TouchHeaderBackButton::draw(renderer, uiTarget, header, folderName.c_str(), false, rightReserve);
   } else {
     GUI.drawHeader(renderer, header, folderName.c_str());
   }

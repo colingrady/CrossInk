@@ -99,24 +99,13 @@ class ChapterHtmlSlimParser {
   uint32_t previewStartOrdinal = 0;
   uint32_t previewElementOrdinal = 0;
   bool malformedMarkupTruncated = false;
+  bool htmlEnded_ = false;
   bool syntheticCharacterData = false;
   XML_Parser activeParser = nullptr;
   FsFile parseFile_;
   size_t parseFileOffset_ = 0;
   size_t parseFileSize_ = 0;
   uint32_t parseStartTime_ = 0;
-
-  struct PendingImageExtraction {
-    std::unique_ptr<ZipFileStreamReader> stream;
-    HalFile file;
-    std::string tag;
-    std::string classAttr;
-    std::string styleAttr;
-    std::string alt;
-    std::string cachedImagePath;
-    bool failed = false;
-  };
-  std::unique_ptr<PendingImageExtraction> pendingImageExtraction_;
 
   bool ensureInputFileOpen();
 
@@ -130,6 +119,7 @@ class ChapterHtmlSlimParser {
     bool hasBackgroundBlack = false, backgroundBlack = false;
     bool hasDirection = false;
     CssTextDirection direction = CssTextDirection::Ltr;
+    bool setsParagraphDirection = false;
     bool hasSup = false, sup = false;
     bool hasSub = false, sub = false;
     bool hasSmallCaps = false, smallCaps = false;
@@ -267,6 +257,7 @@ class ChapterHtmlSlimParser {
   void pushCssAncestor(int depth, const char* tag, std::string_view classAttr);
   static void applyDirectionToEntry(StyleStackEntry& entry, const CssStyle& css);
   static void applySmallCapsToEntry(StyleStackEntry& entry, const CssStyle& css);
+  static void applyVerticalAlignToEntry(StyleStackEntry& entry, const CssStyle& css);
   void emitHorizontalRule(const BlockStyle& blockStyle);
   void finalizeCurrentTableCell();
   void emitBufferedTableAsParagraphs(BufferedTable& table);
@@ -286,11 +277,6 @@ class ChapterHtmlSlimParser {
   void flushMalformedPartialContent();
   bool appendMalformedMarkupWarningPage();
   void prewarmSectionAdvanceTable(FsFile& file) const;
-  bool startImageExtraction(const char* tag, std::string_view classAttr, std::string_view styleAttr,
-                            const std::string& alt, const std::string& resolvedPath);
-  ParseStatus pumpPendingImageExtraction();
-  bool finishPendingImageExtraction(PendingImageExtraction& pending);
-  void fallbackPendingImage(PendingImageExtraction& pending);
   // XML callbacks
   static void XMLCALL startElement(void* userData, const XML_Char* name, const XML_Char** atts);
   static void XMLCALL characterData(void* userData, const XML_Char* s, int len);

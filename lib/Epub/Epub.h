@@ -21,6 +21,8 @@ class Epub {
   std::string tocNcxItem;
   // the nav file (EPUB 3)
   std::string tocNavItem;
+  // the guide TOC page (EPUB 2)
+  std::string tocGuideItem;
   // where is the EPUBfile?
   std::string filepath;
   // the base path for items in the EPUB file
@@ -156,7 +158,6 @@ class Epub {
   bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize,
                                 bool allowEarlyStop = false) const;
   bool extractItemToFile(const std::string& itemHref, const std::string& destPath) const;
-  std::unique_ptr<ZipFileStreamReader> openItemContentsStream(const std::string& itemHref, size_t chunkSize) const;
   bool getItemSize(const std::string& itemHref, size_t* size) const;
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
   BookMetadataCache::TocEntry getTocItem(int tocIndex) const;
@@ -164,6 +165,7 @@ class Epub {
   int getTocItemsCount() const;
   int getSpineIndexForTocIndex(int tocIndex) const;
   int getTocIndexForSpineIndex(int spineIndex) const;
+  bool isNavigationDocumentSpine(int spineIndex, bool* scanSucceeded = nullptr) const;
   size_t getCumulativeSpineItemSize(int spineIndex) const;
   int getSpineIndexForTextReference() const;
 
