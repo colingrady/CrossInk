@@ -543,6 +543,10 @@ void ActivityManager::notifyInputLockChanged(const bool locked) {
   }
 }
 
+void ActivityManager::notifyUserInput() {
+  if (currentActivity) currentActivity->onUserInput();
+}
+
 void ActivityManager::exitActivity(const RenderLock& lock) {
   // Note: lock must be held by the caller
   if (currentActivity) {

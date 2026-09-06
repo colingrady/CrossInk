@@ -1516,6 +1516,8 @@ void EpubReaderActivity::onInputLockChanged(const bool locked) {
   }
 }
 
+void EpubReaderActivity::onUserInput() { cancelSilentPrefetchForInput(); }
+
 bool EpubReaderActivity::handleQuickLockUnlock(const QuickLockTrigger trigger) {
   if (trigger == QuickLockTrigger::LongMenu) {
     if (longPressMenuHandled) {
@@ -2614,6 +2616,19 @@ bool EpubReaderActivity::transientFeedbackDismissed(const unsigned long showTime
 }
 
 void EpubReaderActivity::loop() {
+  bool rawTouchInput = false;
+#if CROSSINK_APP_CAP_TOUCH
+  int touchDownX = 0;
+  int touchDownY = 0;
+  rawTouchInput = mappedInput.wasScreenTouchDown(touchDownX, touchDownY) || mappedInput.wasScreenTouchReleased();
+#endif
+  const bool rawReaderInput = mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased() || rawTouchInput;
+  if (rawReaderInput) {
+    // This only cancels Full Section's optional next-chapter work. The input
+    // itself remains available to the normal reader routing below.
+    cancelSilentPrefetchForInput();
+  }
+
   if (quickActionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
   if (!epub) {
     // Should never happen
@@ -2641,8 +2656,7 @@ void EpubReaderActivity::loop() {
   // Read it once: wasReleased() consumes that suppression, and a second read
   // in this loop would otherwise turn the same release into a reader-menu open.
   const bool confirmReleased = mappedInput.wasReleased(MappedInputManager::Button::Confirm);
-  const bool userInputPending = mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased() || touch.tapped ||
-                                touch.prev || touch.next || mappedInput.wasScreenTouchReleased();
+  const bool userInputPending = rawReaderInput || touch.tapped || touch.prev || touch.next;
   if (userInputPending) {
     // Do not tear down the parser: suspending here would write a partial cache and
     // make the next build replay from page 0. Yield until the requested render starts.
@@ -3141,7 +3155,11 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  if (nextTriggered) cancelSilentNextChapterPrefetchForForwardTurn();
+  if (nextTriggered) {
+    // Tilt page turns do not produce a raw button or touch edge, but should
+    // still win over optional next-chapter indexing.
+    cancelSilentPrefetchForInput();
+  }
 
   // At end of the book with no suggestion menu, forward button goes home and back
   // button returns to last page
@@ -6415,6 +6433,13 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   preparedNextSpineIndex = nextSpineIndex;
   preparedNextViewportWidth = viewportWidth;
   preparedNextViewportHeight = viewportHeight;
+}
+
+void EpubReaderActivity::cancelSilentPrefetchForInput() {
+  if (silentPrefetchBuildActive.load(std::memory_order_relaxed) &&
+      !silentPrefetchCancelRequested.exchange(true, std::memory_order_relaxed)) {
+    LOG_DBG("ERS", "Reader input requested while silent next-chapter indexing is busy; cancelling prefetch");
+  }
 }
 
 bool EpubReaderActivity::restoreCurrentPageBufferAfterSilentIndex() {

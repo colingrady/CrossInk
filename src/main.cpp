@@ -1647,15 +1647,22 @@ void loop() {
     logSerial.printf("SCREENSHOT_END\n");
   }
 
+  // Notify the active activity before global shortcut and gesture routes consume
+  // the input and skip its loop() for this frame.
+  const bool userInputReceived = gpio.wasAnyPressed() || gpio.wasAnyReleased()
+#if CROSSINK_APP_CAP_TOUCH
+                                 || gpio.wasTouchActivity()
+#endif
+                                 || halTiltSensor.hadActivity();
+
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
-  if (gpio.wasAnyPressed() || gpio.wasAnyReleased()
-#if CROSSINK_APP_CAP_TOUCH
-      || gpio.wasTouchActivity()
-#endif
-      || halTiltSensor.hadActivity() || activityManager.preventAutoSleep()) {
+  if (userInputReceived || activityManager.preventAutoSleep()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
+  }
+  if (userInputReceived) {
+    activityManager.notifyUserInput();
   }
 
   // Let wake continue as soon as its hold has been verified. The release can
@@ -1753,6 +1760,8 @@ void loop() {
   // Home-key taps are consumed until their single- or double-tap action is
   // known.
   if (handleX4ProHomeKeyShortcuts()) {
+    // Simulator Home-key events bypass HalGPIO's raw touch activity signal.
+    activityManager.notifyUserInput();
     return;
   }
 

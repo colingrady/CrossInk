@@ -61,6 +61,9 @@ class Activity {
   // Called by the app-wide Quick Lock. Reader activities use it to exclude
   // locked time from reading statistics; other activities have no state to change.
   virtual void onInputLockChanged(bool) {}
+  // Called from the main loop as soon as raw input arrives, before a global
+  // shortcut or gesture can consume it instead of entering activity loop().
+  virtual void onUserInput() {}
   // Quick Lock may permit one reader-only long-press trigger to unlock. The
   // activity validates that trigger without routing any other normal input.
   virtual bool handleQuickLockUnlock(QuickLockTrigger) { return false; }

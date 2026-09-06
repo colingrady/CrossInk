@@ -157,6 +157,7 @@ class ActivityManager {
   bool handleShortcutAction(CrossPointSettings::SHORT_PWRBTN action);
   bool handleQuickLockUnlock(QuickLockTrigger trigger);
   void notifyInputLockChanged(bool locked);
+  void notifyUserInput();
   bool skipLoopDelay() const;
   std::string getCurrentBookPath() const;
   ScreenshotInfo getScreenshotInfo() const;
