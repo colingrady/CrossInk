@@ -17,6 +17,7 @@
 #include "EndOfBookOptions.h"
 #include "EpubReaderMenuActivity.h"
 #include "GlobalReadingStats.h"
+#include "ManualPageTurnQueue.h"
 #include "ReaderProgressSaveDebouncer.h"
 #include "activities/Activity.h"
 #include "components/OptionPopup.h"
@@ -147,6 +148,7 @@ class EpubReaderActivity final : public Activity {
   static constexpr uint8_t HEAP_SHAPE_REDRAW_DICT = 1U << 1;
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
+  ManualPageTurnQueue pendingManualPageTurns;
   unsigned long pageShownAtMs = 0UL;
   unsigned long lastRenderCompleteMs = 0UL;
   int idlePrewarmSpine = -1;
@@ -428,6 +430,11 @@ class EpubReaderActivity final : public Activity {
   // Opens the reader menu for the current position (short-press Confirm)
   void openReaderMenu();
   void applyOrientation(uint8_t orientation);
+  void requestManualPageTurn(bool isForwardTurn, const char* source);
+  bool drainPendingManualPageTurn();
+  void clearPendingManualPageTurns();
+  void finishManualPageTurnBrakeIfReady();
+  void cancelSilentNextChapterPrefetchForForwardTurn();
   void pageTurn(bool isForwardTurn, const char* source = "unknown");
   float getCurrentBookProgressPercent() const;
   void initializeCompletionPromptTrigger();
@@ -507,7 +514,7 @@ class EpubReaderActivity final : public Activity {
   std::string getCurrentBookTitle() const override { return epub ? epub->getTitle() : std::string{}; }
   bool getFrontlightPanelBookDetails(FrontlightPanelBookDetails& details) override;
   std::unique_ptr<Activity> createFrontlightReadingStatsActivity() override;
-  void onFrontlightPanelOpened() override { pauseReadingPaceTimer("frontlight_panel"); }
+  void onFrontlightPanelOpened() override;
   void onFrontlightPanelClosed() override;
   void onBackdropRenderedForOverlay() override { pageShownAtMs = 0UL; }
   void persistFrontlightPanelSettings() override { saveGlobalSettingsPreservingBookOverrides(); }
