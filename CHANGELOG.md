@@ -17,6 +17,8 @@
 
 ### Changed
 
+- EPUB chapter indexing now starts with much smaller memory allocations and grows in bounded chunks, improving
+  reliability on memory-constrained readers without changing pagination or saved caches.
 - The web EPUB optimizer now prefers nearby authored page and section boundaries when splitting very large chapters.
 - Automatic reading-stat backups no longer rewrite an identical same-day file before sleep.
 - Reader resumes now defer Recent Books and KOReader credential loading until needed and avoid unchanged recent-book writes.
