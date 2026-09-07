@@ -6755,13 +6755,6 @@ void EpubReaderActivity::prepareCurrentSectionForRelayout() {
 bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fontId, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft, const bool updatePanel) {
-  if (page->hasImages()) {
-    GfxRenderer::FrameBufferLoan loan(renderer);
-    page->prepareImageCaches();
-    loan.end();
-    renderer.clearScreen(ReaderUtils::readerBackgroundColor());
-  }
-
 #if CROSSINK_APP_CAP_TOUCH
   if (mappedInput.hasTouchHardware()) {
     if (!touchReaderPreviewAllocationAttempted) {
@@ -6853,6 +6846,15 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
     finalizeBufferComposition();
     renderStatusBar();
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    renderer.clearScreen(ReaderUtils::readerBackgroundColor());
+  }
+  if (pageHasImages) {
+    // Show the new page's placeholders before ZIP extraction or sidecar
+    // materialization. The loan can overwrite the framebuffer, so rebuild
+    // the complete page after returning it; the panel keeps the preview.
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    page->prepareImageCaches();
+    loan.end();
     renderer.clearScreen(ReaderUtils::readerBackgroundColor());
   }
   composePageBuffer();
