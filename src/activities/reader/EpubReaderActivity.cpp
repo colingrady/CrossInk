@@ -5576,7 +5576,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         if (renderer.hasFrameBuffer()) GUI.drawPopup(renderer, tr(STR_INDEXING));
       };
 
-      bool imagesWereSuppressed = false;
       bool layoutAbortedForLowMemory = false;
       bool fallbackBuildSucceeded = false;
       bool usedReadablePartialFallback = false;
@@ -5608,7 +5607,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
           }
         }
 
-        bool attemptImagesWereSuppressed = false;
         bool attemptLayoutAbortedForLowMemory = false;
         const SectionBuildOptions buildOptions{
             buildingFootnotePreview ? pendingFootnotePreviewAnchor.c_str() : nullptr,
@@ -5621,8 +5619,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
           showIndexingPopup();
           {
             GfxRenderer::FrameBufferLoan loan(renderer);
-            buildSucceeded = section->createSectionFile(spec, popupFn, &attemptImagesWereSuppressed,
-                                                        &attemptLayoutAbortedForLowMemory, buildOptions);
+            buildSucceeded =
+                section->createSectionFile(spec, popupFn, nullptr, &attemptLayoutAbortedForLowMemory, buildOptions);
           }
         } else {
           const int target = pendingPageJump.has_value() ? *pendingPageJump : (nextPageNumber < 0 ? 0 : nextPageNumber);
@@ -5684,7 +5682,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
                 LOG_DBG("ERS", "Incremental relayout reached prior watermark: pages=%u target=%d", section->pageCount,
                         cachedChapterPageWatermark);
               }
-              attemptImagesWereSuppressed = attemptImagesWereSuppressed || section->lastBuildImagesWereSuppressed();
               attemptLayoutAbortedForLowMemory =
                   attemptLayoutAbortedForLowMemory || section->lastBuildLayoutAbortedForLowMemory();
               const bool requestedPageAvailable = anchorJump ? anchorPageReady()
@@ -5702,14 +5699,12 @@ void EpubReaderActivity::render(RenderLock&& lock) {
               buildSucceeded =
                   buildCancelledForBack || (!buildFailed && (section->pageCount > 0 || section->isBuildComplete()));
             } else {
-              attemptImagesWereSuppressed = attemptImagesWereSuppressed || section->lastBuildImagesWereSuppressed();
               attemptLayoutAbortedForLowMemory =
                   attemptLayoutAbortedForLowMemory || section->lastBuildLayoutAbortedForLowMemory();
             }
             buildPopupPending = false;
           }
         }
-        imagesWereSuppressed = imagesWereSuppressed || attemptImagesWereSuppressed;
         layoutAbortedForLowMemory = attemptLayoutAbortedForLowMemory;
         if (buildSucceeded) {
           activeSectionFontId = fontId;
@@ -5849,13 +5844,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         }
       }
 
-      if (!buildingFootnotePreview && imagesWereSuppressed) {
-        snprintf(APP_STATE.pendingAlertTitle, sizeof(APP_STATE.pendingAlertTitle), "%s",
-                 tr(STR_LOW_MEMORY_IMAGES_TITLE));
-        snprintf(APP_STATE.pendingAlertBody, sizeof(APP_STATE.pendingAlertBody), "%s", tr(STR_LOW_MEMORY_IMAGES_BODY));
-        APP_STATE.pendingAlertGoHomeOnBack.store(false, std::memory_order_relaxed);
-        APP_STATE.hasPendingAlert.store(true, std::memory_order_release);
-      }
     } else {
       LOG_DBG("ERS", "Cache found, skipping build... (pages=%u, font=%d mode=%u free=%u, maxAlloc=%u)",
               section->pageCount, activeSectionFontId, static_cast<unsigned>(usedRenderMode), ESP.getFreeHeap(),
