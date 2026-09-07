@@ -36,7 +36,7 @@ constexpr size_t SECTION_HTML_STREAM_CHUNK_SIZE = 8192;
 constexpr size_t LOW_MEMORY_SECTION_HTML_STREAM_CHUNK_SIZE = 1024;
 
 void prepareSectionZipInflate(GfxRenderer& renderer, const int fontId) {
-  if (ESP.getMaxAllocHeap() < InflateStream::requiredStorageSize(true) && renderer.isSdCardFont(fontId)) {
+  if (ESP.getMaxAllocHeap() < InflateStream::requiredInternalStorageSize(true) && renderer.isSdCardFont(fontId)) {
     renderer.releaseSdCardFontForLowMemory(fontId);
   }
 }
@@ -47,7 +47,8 @@ size_t sectionHtmlStreamChunkSize(const bool preview) {
   }
 
   const uint32_t maxAlloc = ESP.getMaxAllocHeap();
-  const size_t largeStreamBudget = InflateStream::requiredStorageSize(true) + (2U * SECTION_HTML_STREAM_CHUNK_SIZE);
+  const size_t largeStreamBudget =
+      InflateStream::requiredInternalStorageSize(true) + (2U * SECTION_HTML_STREAM_CHUNK_SIZE);
   if (maxAlloc < largeStreamBudget) {
     LOG_DBG("SCT", "Using low-memory HTML stream chunk (maxAlloc=%u)", maxAlloc);
     return LOW_MEMORY_SECTION_HTML_STREAM_CHUNK_SIZE;

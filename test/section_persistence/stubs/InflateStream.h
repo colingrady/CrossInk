@@ -4,5 +4,5 @@
 
 class InflateStream {
  public:
-  static constexpr size_t requiredStorageSize(bool) { return 32768; }
+  static constexpr size_t requiredInternalStorageSize(bool) { return 32768; }
 };
