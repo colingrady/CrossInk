@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "PoolBudget.h"
+
 #if defined(ARDUINO_ARCH_ESP32) && !defined(SIMULATOR)
 #include <esp_heap_caps.h>
 #endif

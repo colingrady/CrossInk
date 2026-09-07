@@ -28,6 +28,7 @@ add_library(crosspoint_test_common INTERFACE)
 target_include_directories(crosspoint_test_common INTERFACE
   ${REPO_ROOT}
   ${REPO_ROOT}/lib
+  ${REPO_ROOT}/lib/MemoryBudget
 )
 target_compile_options(crosspoint_test_common INTERFACE
   -Wall
@@ -74,3 +75,4 @@ add_subdirectory(input_release_guard)
 add_subdirectory(bitmap_resample)
 
 add_subdirectory(pxc_v2)
+add_subdirectory(memory_policy)
