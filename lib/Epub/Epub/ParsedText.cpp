@@ -777,12 +777,18 @@ bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
     return true;
   }
 
-  Arena layoutArena;
+  Arena layoutArena(psramHeapAvailable() ? ArenaBacking::PsramPreferred : ArenaBacking::Default);
   if (!layoutArena.init(LAYOUT_ARENA_SLAB_BYTES)) {
     LOG_ERR("PTX", "Failed to allocate layout scratch arena (%u bytes)",
             static_cast<unsigned>(LAYOUT_ARENA_SLAB_BYTES));
     return false;
   }
+
+  ScopedCleanup logLayoutPools{[&layoutArena] {
+    LOG_DBG("PTX", "Layout slabs: internal=%u psram=%u psramReserve=%u",
+            unsigned(layoutArena.capacityInPool(MemoryPool::Internal)),
+            unsigned(layoutArena.capacityInPool(MemoryPool::Psram)), unsigned(MemoryBudget::EPUB_PSRAM_RESERVE));
+  }};
 
   if (!blockStyle.directionDefined && hasRtlWord) {
     const size_t wordsToScan = std::min(words.size(), RTL_PARAGRAPH_PROBE_WORDS);
