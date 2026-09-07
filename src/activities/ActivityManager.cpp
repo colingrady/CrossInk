@@ -144,7 +144,8 @@ bool openFrontlightPanel(Activity& activity, GfxRenderer& renderer, MappedInputM
   return true;
 }
 
-bool applyTwoFingerSwipeAction(Activity& activity, MappedInputManager& mappedInput, GfxRenderer& renderer) {
+bool applyTwoFingerSwipeAction(Activity& activity, MappedInputManager& mappedInput, GfxRenderer& renderer,
+                               ActivityManager& activityManager) {
   MappedInputManager::CompletedSwipe completed;
   if (!mappedInput.wasCompletedMultiTouchSwipe(completed)) return false;
 
@@ -183,7 +184,7 @@ bool applyTwoFingerSwipeAction(Activity& activity, MappedInputManager& mappedInp
       Frontlight.setOn(true);
       SETTINGS.frontlightBrightness = brightness;
       SETTINGS.frontlightOn = 1;
-      if (brightness != previousBrightness || !previousOn) SETTINGS.saveToFile();
+      if (brightness != previousBrightness || !previousOn) activityManager.persistGlobalSettings();
       return true;
     }
     case CrossPointSettings::TWO_FINGER_SWIPE_INCREASE_WARMTH:
@@ -196,7 +197,7 @@ bool applyTwoFingerSwipeAction(Activity& activity, MappedInputManager& mappedInp
       Frontlight.setWarmth(warmth);
       SETTINGS.frontlightWarmth = warmth;
       SETTINGS.frontlightOn = Frontlight.isOn() ? 1 : 0;
-      if (warmth != previousWarmth || Frontlight.isOn() != previousOn) SETTINGS.saveToFile();
+      if (warmth != previousWarmth || Frontlight.isOn() != previousOn) activityManager.persistGlobalSettings();
       return true;
     }
     case CrossPointSettings::TWO_FINGER_SWIPE_NEXT_CHAPTER:
@@ -299,7 +300,7 @@ void ActivityManager::loop() {
 
       // The frontlight panel owns its own sliders.
       if (currentActivity->name != "FrontlightPanel" &&
-          applyTwoFingerSwipeAction(*currentActivity, mappedInput, renderer)) {
+          applyTwoFingerSwipeAction(*currentActivity, mappedInput, renderer, *this)) {
         return;
       }
 
@@ -864,6 +865,26 @@ bool ActivityManager::requestManualReaderRefresh() {
 bool ActivityManager::handleShortcutAction(const CrossPointSettings::SHORT_PWRBTN action) {
   return currentActivity && (currentActivity->isReaderActivity() || currentActivity->isHomeActivity()) &&
          currentActivity->handleShortcutAction(action);
+}
+
+void ActivityManager::persistGlobalSettings() {
+  // A modal may be current while its EPUB reader, which owns the per-book
+  // override, remains on the stack. Let that reader protect the global write.
+  if (currentActivity && currentActivity->isEpubReaderActivity()) {
+    currentActivity->persistGlobalSettings();
+    return;
+  }
+  for (auto it = stackActivities.rbegin(); it != stackActivities.rend(); ++it) {
+    if (*it && (*it)->isEpubReaderActivity()) {
+      (*it)->persistGlobalSettings();
+      return;
+    }
+  }
+  if (currentActivity) {
+    currentActivity->persistGlobalSettings();
+  } else {
+    SETTINGS.saveToFile();
+  }
 }
 
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }

@@ -2078,17 +2078,32 @@ void EpubReaderActivity::saveDictionaryFontForBook(const char* familyName, const
   saveBookReaderSettingsFile(epub->getCachePath(), data);
 }
 
-void EpubReaderActivity::saveGlobalSettingsPreservingBookOverrides() {
+void EpubReaderActivity::persistReaderSdFontSettings() {
+  if (bookHasCustomReaderSettings) {
+    saveCurrentBookReaderSettings();
+  } else {
+    // This book inherits the global font. Keep a repaired missing-font or
+    // legacy-size value in the global snapshot, while saveGlobalSettings...
+    // still keeps a separate per-book render-mode override out of the write.
+    globalReaderSettingsBeforeBook.readerFontPointSize = SETTINGS.readerFontPointSize;
+    std::strncpy(globalReaderSettingsBeforeBook.sdFontFamilyName, SETTINGS.sdFontFamilyName,
+                 sizeof(globalReaderSettingsBeforeBook.sdFontFamilyName) - 1);
+    globalReaderSettingsBeforeBook.sdFontFamilyName[sizeof(globalReaderSettingsBeforeBook.sdFontFamilyName) - 1] = '\0';
+    saveGlobalSettingsPreservingBookOverrides();
+  }
+}
+
+bool EpubReaderActivity::saveGlobalSettingsPreservingBookOverrides() {
   if (!restoreGlobalReaderSettingsOnExit) {
-    SETTINGS.saveToFile();
-    return;
+    return SETTINGS.saveToFile();
   }
 
   ReaderSettingsSnapshot activeReaderSettings;
   captureReaderSettings(activeReaderSettings);
   applyReaderSettings(globalReaderSettingsBeforeBook);
-  SETTINGS.saveToFile();
+  const bool saved = SETTINGS.saveToFile();
   applyReaderSettings(activeReaderSettings);
+  return saved;
 }
 
 void EpubReaderActivity::beginGlobalSettingsEdit() {
@@ -2126,6 +2141,11 @@ void EpubReaderActivity::saveDictionaryFontForBookReader(void* ctx, const char* 
   static_cast<EpubReaderActivity*>(ctx)->saveDictionaryFontForBook(familyName, pointSize);
 }
 
+void EpubReaderActivity::persistReaderSdFontSettingsForBook(void* ctx) {
+  if (!ctx) return;
+  static_cast<EpubReaderActivity*>(ctx)->persistReaderSdFontSettings();
+}
+
 void EpubReaderActivity::saveGlobalSettingsForBookReader(void* ctx) {
   if (!ctx) {
     return;
@@ -2159,6 +2179,7 @@ void EpubReaderActivity::onEnter() {
   captureGlobalReaderSettings();
   epub->setupCacheDir();
   loadBookReaderSettings();
+  sdFontSystem.setSettingsPersistenceCallback(persistReaderSdFontSettingsForBook, this);
   ensureReaderSdFontLoaded(renderer);
   ImageBlock::clearSessionRenderFailures();
   ImageBlock::setExtractor(epub.get(), [](void* context, const char* source, const char* destination) {
@@ -2283,6 +2304,7 @@ void EpubReaderActivity::onEnter() {
 }
 
 void EpubReaderActivity::onExit() {
+  sdFontSystem.setSettingsPersistenceCallback(nullptr, nullptr);
   clearPendingManualPageTurns();
   mappedInput.setReaderTouchscreenOverride(false);
 
@@ -5192,7 +5214,7 @@ void EpubReaderActivity::showTiltPageTurnFeedback(bool enabled) {
 void EpubReaderActivity::toggleHomeButtonInReader() {
   if (!gpio.hasHomeKey()) return;
   SETTINGS.homeButtonInReaderEnabled = SETTINGS.homeButtonInReaderEnabled ? 0 : 1;
-  if (!SETTINGS.saveToFile()) {
+  if (!saveGlobalSettingsPreservingBookOverrides()) {
     LOG_ERR("ERS", "Failed to save Home button reader setting");
   }
   mappedInput.clearDeferredHomeGesture();

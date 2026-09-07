@@ -392,11 +392,13 @@ class EpubReaderActivity final : public Activity {
   void loadBookReaderSettings();
   void saveCurrentBookReaderSettings();
   void saveDictionaryFontForBook(const char* familyName, uint8_t pointSize);
-  void saveGlobalSettingsPreservingBookOverrides();
+  void persistReaderSdFontSettings();
+  bool saveGlobalSettingsPreservingBookOverrides();
   void beginGlobalSettingsEdit();
   void endGlobalSettingsEdit();
   static void saveReaderOptionsForBook(void* ctx);
   static void saveDictionaryFontForBookReader(void* ctx, const char* familyName, uint8_t pointSize);
+  static void persistReaderSdFontSettingsForBook(void* ctx);
   static void saveGlobalSettingsForBookReader(void* ctx);
   static void beginGlobalSettingsEditForBookReader(void* ctx);
   static void endGlobalSettingsEditForBookReader(void* ctx);
@@ -520,6 +522,7 @@ class EpubReaderActivity final : public Activity {
   void onFrontlightPanelClosed() override;
   void onBackdropRenderedForOverlay() override { pageShownAtMs = 0UL; }
   void persistFrontlightPanelSettings() override { saveGlobalSettingsPreservingBookOverrides(); }
+  void persistGlobalSettings() override { saveGlobalSettingsPreservingBookOverrides(); }
   void onFrontlightGlobalSettingsOpened() override { beginGlobalSettingsEdit(); }
   void onFrontlightGlobalSettingsClosed() override { endGlobalSettingsEdit(); }
   bool handleFrontlightPanelResult(const FrontlightPanelResult& result) override;
