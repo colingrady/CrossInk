@@ -48,6 +48,7 @@
 - Opening the reader menu on button-only devices now keeps the clock and battery status visible unless each is set to Always hide.
 - View Clippings now shows loading feedback while preparing the list, so the first tap visibly responds.
 - X4 Pro USB uploads no longer inject task-watchdog errors into the serial transfer response.
+- Optimized EPUB images load more reliably with less memory, including when generating the sleep screen.
 - Long-press Menu and Back shortcuts no longer pass their release into reader screens opened by the shortcut.
 - Mixed-direction EPUB paragraphs now retain their block reading direction when inline spans change direction.
 - End-of-book suggestions now receive input before reader shortcuts and automatic page turns.

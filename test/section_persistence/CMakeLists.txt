@@ -5,6 +5,8 @@ add_executable(SectionPersistenceTest
 )
 
 target_include_directories(SectionPersistenceTest PRIVATE
+  ${REPO_ROOT}/lib/InflateReader
+  ${REPO_ROOT}/lib/uzlib/src
   ${CMAKE_CURRENT_SOURCE_DIR}/stubs
   ${REPO_ROOT}/lib
   ${REPO_ROOT}/lib/Epub

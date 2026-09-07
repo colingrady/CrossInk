@@ -72,3 +72,5 @@ add_subdirectory(ligature_guard)
 add_subdirectory(chapter_html_slim_parser)
 add_subdirectory(input_release_guard)
 add_subdirectory(bitmap_resample)
+
+add_subdirectory(pxc_v2)

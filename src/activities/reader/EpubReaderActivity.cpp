@@ -2178,13 +2178,22 @@ void EpubReaderActivity::onEnter() {
   // instead would leave reader mode and the bookmark/clipping stores unbalanced.
   captureGlobalReaderSettings();
   epub->setupCacheDir();
+  {
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    epub->ensureOptimizerImageIndex();
+  }
   loadBookReaderSettings();
   sdFontSystem.setSettingsPersistenceCallback(persistReaderSdFontSettingsForBook, this);
   ensureReaderSdFontLoaded(renderer);
   ImageBlock::clearSessionRenderFailures();
-  ImageBlock::setExtractor(epub.get(), [](void* context, const char* source, const char* destination) {
-    return static_cast<Epub*>(context)->extractItemToFile(source, destination);
-  });
+  ImageBlock::setExtractor(
+      epub.get(),
+      [](void* context, const char* source, const char* destination) {
+        return static_cast<Epub*>(context)->extractItemToFile(source, destination);
+      },
+      [](void* context, const char* source, const int width, const int height, const char* destination) {
+        return static_cast<Epub*>(context)->seedOptimizerImageCache(source, width, height, destination);
+      });
 
   // Configure screen orientation based on settings
   // NOTE: This affects layout math and must be applied before any render calls.
@@ -2308,8 +2317,8 @@ void EpubReaderActivity::onExit() {
   clearPendingManualPageTurns();
   mappedInput.setReaderTouchscreenOverride(false);
 
-  // The extraction callback holds the Epub as a raw context pointer.
-  ImageBlock::setExtractor(nullptr, nullptr);
+  // The image callbacks hold the Epub as a raw context pointer.
+  ImageBlock::setExtractor(nullptr, nullptr, nullptr);
   releaseGrayscaleStripScratch(true);
   ImageBlock::releaseSessionPixelCache();
 
@@ -6746,6 +6755,13 @@ void EpubReaderActivity::prepareCurrentSectionForRelayout() {
 bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fontId, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft, const bool updatePanel) {
+  if (page->hasImages()) {
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    page->prepareImageCaches();
+    loan.end();
+    renderer.clearScreen(ReaderUtils::readerBackgroundColor());
+  }
+
 #if CROSSINK_APP_CAP_TOUCH
   if (mappedInput.hasTouchHardware()) {
     if (!touchReaderPreviewAllocationAttempted) {
@@ -7596,6 +7612,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
       LOG_DBG("SLP", "EPUB: failed to load %s", filePath.c_str());
       return false;
     }
+    epub->ensureOptimizerImageIndex();
   }
   ensureReaderSdFontLoaded(renderer);
 
@@ -7721,6 +7738,19 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
     return false;
   }
 
+  {
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    ImageBlock::setExtractor(
+        epub.get(),
+        [](void* context, const char* source, const char* destination) {
+          return static_cast<Epub*>(context)->extractItemToFile(source, destination, 256);
+        },
+        [](void* context, const char* source, int width, int height, const char* destination) {
+          return static_cast<Epub*>(context)->seedOptimizerImageCache(source, width, height, destination);
+        });
+    page->prepareImageCaches();
+    ImageBlock::setExtractor(nullptr, nullptr, nullptr);
+  }
   renderer.clearScreen(ReaderUtils::readerBackgroundColor());
   page->render(renderer, renderFontId, layout.marginLeft, layout.marginTop, ReaderUtils::readerForegroundBlack());
   drawPublisherPageMarkers(renderer, *page, layout.marginTop, renderer.getScreenHeight() - layout.marginBottom,

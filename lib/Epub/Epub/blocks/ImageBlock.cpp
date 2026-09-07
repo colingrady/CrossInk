@@ -24,10 +24,12 @@ ImageBlock::ImageBlock(std::string imagePath, std::string sourcePath, int16_t wi
 
 void* ImageBlock::extractContext = nullptr;
 ImageBlock::ExtractFn ImageBlock::extractFn = nullptr;
+ImageBlock::SeedCacheFn ImageBlock::seedCacheFn = nullptr;
 
-void ImageBlock::setExtractor(void* context, ExtractFn fn) {
+void ImageBlock::setExtractor(void* context, ExtractFn extract, SeedCacheFn seedCache) {
   extractContext = context;
-  extractFn = fn;
+  extractFn = extract;
+  seedCacheFn = seedCache;
 }
 
 namespace {
@@ -327,6 +329,22 @@ bool ImageBlock::hasValidCache() const {
   return valid;
 }
 
+void ImageBlock::prepareCache() const {
+  if (hasValidCache()) {
+    LOG_DBG("IMG", "Local image cache hit: %s", imagePath.c_str());
+    return;
+  }
+  if (sourcePath.empty()) return;
+  const std::string cache = getCachePath(imagePath);
+  Storage.remove((cache + ".optimizer.tmp").c_str());
+  Storage.remove((cache + ".optimizer.source").c_str());
+  if (seedCacheFn && seedCacheFn(extractContext, sourcePath.c_str(), width, height, cache.c_str())) return;
+  if (extractFn && !Storage.exists(imagePath.c_str()) &&
+      !extractFn(extractContext, sourcePath.c_str(), imagePath.c_str())) {
+    LOG_ERR("IMG", "Image preflight extraction failed: %s", sourcePath.c_str());
+  }
+}
+
 bool ImageBlock::needsDecode() const { return !imageFailedThisSession(imagePath) && !hasValidCache(); }
 
 void ImageBlock::clearSessionRenderFailures() {
@@ -395,12 +413,6 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   if (renderFromCache(renderer, cachePath, x, y, width, height)) {
     renderer.preserveImagePolarity(x, y, width, height);
     return;  // Successfully rendered from cache
-  }
-
-  if (!sourcePath.empty() && extractFn && !Storage.exists(imagePath.c_str())) {
-    if (!extractFn(extractContext, sourcePath.c_str(), imagePath.c_str())) {
-      LOG_ERR("IMG", "Lazy extraction failed: %s", sourcePath.c_str());
-    }
   }
 
   // No cache - need to decode the image

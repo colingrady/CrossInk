@@ -651,3 +651,98 @@ if (parsedSize != fileSize) {
     std::warning(std::format("Unparsed data detected: {} bytes remaining at offset 0x{:X}", fileSize - parsedSize, parsedSize));
 }
 ```
+
+## Optimizer image transport (PXC2 and COIX)
+
+Optimizer images are optional EPUB sidecars. Original JPEG/PNG assets remain the
+compatibility fallback. `META-INF/crossink/optimizer-v1.json`,
+`META-INF/crossink/optimizer-images-v1.idx`, and all
+`META-INF/crossink/pxc/*.pxc2` entries must use ZIP STORE. PXC2 has its own block
+compression; the firmware rejects ZIP-deflated PXC2 before starting an inflater.
+The manifest keeps `format: "crossink-optimizer"` and `version: 1`. Each image has
+`href`, `pxc`, `width`, `height`, `pxcFormat: "pxc2"`, `pxcBytes` (complete transport
+size), and `pixelCrc32`. Missing `pxcFormat` means legacy raw PXC1.
+
+All integers below are unsigned little endian. Fields are serialized explicitly,
+not by writing native C++ structures. CRCs use standard IEEE CRC32 (zlib).
+
+### PXC2
+
+The 32-byte header is:
+
+| Offset | Bytes | Field |
+| --- | --- | --- |
+| 0 | 4 | `PXC2` |
+| 4 | 1 | Version 2 |
+| 5 | 1 | Pixel format 1: four 2-bit pixels per byte, most significant first |
+| 6 | 2 | Header bytes: 32 |
+| 8 | 2 | Width |
+| 10 | 2 | Height |
+| 12 | 2 | Row bytes: `(width + 3) / 4` |
+| 14 | 2 | Block bytes: 2048 |
+| 16 | 2 | Block count: ceiling of raw bytes / 2048 |
+| 18 | 2 | Flags: zero |
+| 20 | 4 | Raw pixel bytes |
+| 24 | 4 | Raw pixel CRC32 |
+| 28 | 4 | Complete PXC2 file bytes |
+
+Dimensions are 1–1024, raw data is at most 128 KiB, and there are at most 64
+blocks. Each block starts with a 12-byte header: codec (`u8`, 0 RAW, 1 raw DEFLATE,
+2 PackBits), zero flags (`u8`), raw length (`u16`), encoded length (`u16`), sequence
+(`u16`, starting at zero), decoded-block CRC32 (`u32`). Lengths are 1–2048. All
+non-final blocks have 2048 raw bytes. Compressed blocks must be smaller than raw;
+otherwise producers use RAW. Every block is independent. PackBits controls 0–127
+copy the next control+1 bytes; 129–255 repeat the next byte 257-control times;
+128 is rejected. Raw DEFLATE must terminate exactly, with no extra input/output.
+Python uses zlib level 8 and `wbits=-15`; the browser uses PackBits/RAW.
+
+The reader reuses a fallibly allocated session workspace (5928 bytes on the
+64-bit host; firmware size is compile-time limited below 6500), verifies all
+lengths/CRCs and resizes rows into `img_*.pxc.optimizer.tmp`. It checks size and
+syncs/closes before publishing. On filesystems that cannot rename over an existing
+file, `.optimizer.previous` retains the previous cache until publication succeeds;
+failed rollback leaves that backup available for recovery on the next attempt. PXC2 never needs a full raw source temporary file.
+The local raw PXC layout remains two `u16` dimensions plus packed rows. No section
+cache version change is required. Hardware heap and visual results remain device
+acceptance checks, not implied by host workspace accounting.
+
+### COIX version 1
+
+The local index is `/.crosspoint/epub_<hash>/optimizer-images.idx`. Its header is:
+
+| Offset | Bytes | Field |
+| --- | --- | --- |
+| 0 | 4 | `COIX` |
+| 4 | 2 | Version 1 |
+| 6 | 2 | Header bytes: 32 |
+| 8 | 2 | Record bytes: 208 |
+| 10 | 2 | Record count: 0–256 |
+| 12 | 4 | Flags/reserved: zero |
+| 16 | 4 | Manifest central-directory CRC32 |
+| 20 | 4 | Manifest uncompressed bytes |
+| 24 | 4 | CRC32 of all records |
+| 28 | 4 | CRC32 of header bytes 0–27 |
+
+Each 208-byte record contains NUL-terminated `href[129]` (offset 0),
+`pxcHref[65]` (129), width `u16` (194), height `u16` (196), format `u8` (198,
+1 legacy or 2 PXC2), zero flags `u8` (199), complete sidecar bytes `u32` (200),
+and pixel CRC32 `u32` (204). Paths are relative, bounded UTF-8; traversal,
+backslashes, control characters, colons and percent escapes are rejected.
+Sidecars must be beneath `META-INF/crossink/pxc/`. Duplicate image hrefs are invalid;
+producers keep one optional sidecar per href and omit unsupported/over-limit
+entries. Firmware can resize that sidecar for other layouts.
+
+Reader setup validates a packaged index and copies it through a temporary local
+file, or builds it from a legacy manifest while the framebuffer is loaned. Generic
+`Epub::load()` does not build indexes. A lookup scans records on SD and retains
+only one last hit. Manifest identity changes invalidate the local index. Per-page
+preflight reuses local pixels first, then materializes just that page's sidecars,
+then extracts original assets as fallback. Legacy ZIP inflation also runs under
+the framebuffer loan. Sleep-page generation uses the same preflight. Temporary
+index files are cleaned during setup and per-image temporaries during preflight.
+
+Hardware acceptance: clear only the test book's cache, open legacy/PXC2 variants
+with SD font and AA, visit/revisit image pages and sleep, compare portrait and
+landscape output, and record internal free/largest heap blocks and low-water
+marks. Repeat corrupt sidecars, full/read-only SD, interrupted writes and book
+replacement at the same path on X3/X4, Sticky (SPI SD) and X4 Pro (SDMMC).
