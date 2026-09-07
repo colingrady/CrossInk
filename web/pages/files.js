@@ -2018,6 +2018,9 @@ const X_LOCATION_WORDS_PER_UNIT = 64;
 const SECTION_SPLIT_WORD_THRESHOLD = 8000;
 const SECTION_SPLIT_BYTE_THRESHOLD = 32768;
 const SECTION_SPLIT_HARD_BYTE_LIMIT = 49152;
+// Let an oversized section run a little past its preferred size when that reaches an
+// author-supplied break. The hard limit still protects the reader's section builder.
+const SECTION_SPLIT_NATURAL_BOUNDARY_LOOKAHEAD_BYTES = 8192;
 const SECTION_SPLIT_SUFFIX_RE = /__ci_section_\d{3}(?=\.[^.]+$)/i;
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 const OPF_NS = "http://www.idpf.org/2007/opf";
@@ -2654,6 +2657,71 @@ function isIgnorableSectionSplitNode(node) {
   return node?.nodeType === Node.TEXT_NODE && !(node.textContent || "").trim();
 }
 
+function hasNaturalSectionPageBoundary(node) {
+  if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+  const elements = [node, ...node.querySelectorAll("*")];
+  return elements.some((element) => {
+    const name = localName(element);
+    if (name === "hr") return true;
+    const epubType =
+      element.getAttributeNS?.("http://www.idpf.org/2007/ops", "type") || element.getAttribute("epub:type") || "";
+    const role = element.getAttribute("role") || "";
+    const style = element.getAttribute("style") || "";
+    return (
+      /(^|\s)pagebreak(\s|$)/i.test(epubType) ||
+      /(^|\s)doc-pagebreak(\s|$)/i.test(role) ||
+      /(?:^|;)\s*(?:-epub-)?(?:page-break|break)-(?:before|after)\s*:\s*(?:always|page|left|right|recto|verso)\b/i.test(
+        style,
+      )
+    );
+  });
+}
+
+function isNaturalSectionSplitBoundary(previous, next) {
+  return hasNaturalSectionPageBoundary(previous) || hasNaturalSectionPageBoundary(next) || isHeadingElement(next);
+}
+
+function findNaturalSectionSplitIndex(splitChildren, candidateIndex, current, currentBytes, serializer) {
+  const byteLimit = Math.min(
+    SECTION_SPLIT_HARD_BYTE_LIMIT,
+    Math.max(currentBytes, SECTION_SPLIT_BYTE_THRESHOLD) + SECTION_SPLIT_NATURAL_BOUNDARY_LOOKAHEAD_BYTES,
+  );
+  let projectedBytes = currentBytes;
+  for (let index = candidateIndex; index < splitChildren.length; index++) {
+    if (index > candidateIndex) {
+      projectedBytes += utf8ByteLength(serializer.serializeToString(splitChildren[index - 1]));
+    }
+    if (projectedBytes > byteLimit) break;
+    const priorNodes = current.concat(splitChildren.slice(candidateIndex, index));
+    const previous = [...priorNodes].reverse().find((node) => !isIgnorableSectionSplitNode(node));
+    const next = splitChildren[index];
+    const canBreakBefore =
+      !!previous &&
+      isSafeSectionSplitElement(next) &&
+      !shouldKeepSectionSplitCluster(next) &&
+      !isHeadingElement(previous);
+    if (canBreakBefore && isNaturalSectionSplitBoundary(previous, next)) return index;
+  }
+  return candidateIndex;
+}
+
+function findNaturalSectionSplitOffsetInCurrent(current, serializer) {
+  let trailingBytes = 0;
+  for (let offset = current.length - 1; offset > 0; offset--) {
+    trailingBytes += utf8ByteLength(serializer.serializeToString(current[offset]));
+    if (trailingBytes > SECTION_SPLIT_NATURAL_BOUNDARY_LOOKAHEAD_BYTES) break;
+    const previous = [...current.slice(0, offset)].reverse().find((node) => !isIgnorableSectionSplitNode(node));
+    const next = current[offset];
+    const canBreakBefore =
+      !!previous &&
+      isSafeSectionSplitElement(next) &&
+      !shouldKeepSectionSplitCluster(next) &&
+      !isHeadingElement(previous);
+    if (canBreakBefore && isNaturalSectionSplitBoundary(previous, next)) return offset;
+  }
+  return -1;
+}
+
 function chunkHasReaderContent(nodes) {
   const visit = (node, hidden) => {
     if (node.nodeType === Node.TEXT_NODE) return !hidden && !!(node.textContent || "").trim();
@@ -2844,7 +2912,8 @@ function splitLongXhtmlSections(xhtmlFiles, opfContent, opfPath, enabled) {
       currentBytes = fixedBytes;
     };
 
-    for (const child of splitChildren) {
+    for (let childIndex = 0; childIndex < splitChildren.length; childIndex++) {
+      const child = splitChildren[childIndex];
       const childWords = countLocationWords(child.textContent || "");
       const childBytes = utf8ByteLength(serializer.serializeToString(child));
       const lastContentNode = [...current].reverse().find((node) => !isIgnorableSectionSplitNode(node));
@@ -2857,7 +2926,37 @@ function splitLongXhtmlSections(xhtmlFiles, opfContent, opfPath, enabled) {
         isSafeSectionSplitElement(child) &&
         !shouldKeepSectionSplitCluster(child) &&
         !isHeadingElement(lastContentNode);
-      if (wouldExceed && canBreakBefore) flush();
+      const naturalSplitOffset =
+        wouldExceed && currentBytes <= SECTION_SPLIT_HARD_BYTE_LIMIT
+          ? findNaturalSectionSplitOffsetInCurrent(current, serializer)
+          : -1;
+      if (naturalSplitOffset > 0) {
+        const completed = current.splice(0, naturalSplitOffset);
+        chunks.push(completed);
+        currentWords = current.reduce((sum, node) => sum + countLocationWords(node.textContent || ""), 0);
+        currentBytes =
+          fixedBytes + current.reduce((sum, node) => sum + utf8ByteLength(serializer.serializeToString(node)), 0);
+      } else if (wouldExceed && canBreakBefore) {
+        const naturalSplitIndex = findNaturalSectionSplitIndex(
+          splitChildren,
+          childIndex,
+          current,
+          currentBytes,
+          serializer,
+        );
+        if (naturalSplitIndex > childIndex) {
+          for (let index = childIndex; index < naturalSplitIndex; index++) {
+            const node = splitChildren[index];
+            current.push(node);
+            currentWords += countLocationWords(node.textContent || "");
+            currentBytes += utf8ByteLength(serializer.serializeToString(node));
+          }
+          flush();
+          childIndex = naturalSplitIndex - 1;
+          continue;
+        }
+        flush();
+      }
 
       current.push(child);
       currentWords += childWords;
