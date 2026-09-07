@@ -19,6 +19,8 @@ inline constexpr oflag_t O_RDWR = 1;
 
 struct HostFileData {
   std::vector<uint8_t> bytes;
+  size_t readCalls = 0, readBytes = 0;
+  size_t readFailAt = std::numeric_limits<size_t>::max();
   size_t failAt = std::numeric_limits<size_t>::max();
 };
 
@@ -35,9 +37,18 @@ class HalFile : public Print {
   }
   size_t position() const { return cursor_; }
 
+  int read() {
+    uint8_t b;
+    return read(&b, 1) == 1 ? b : -1;
+  }
+  bool seekCur(int offset) { return seek(cursor_ + offset); }
+
   int read(void* output, const size_t length) {
     if (!data_) return 0;
-    const size_t readable = std::min(length, data_->bytes.size() - std::min(cursor_, data_->bytes.size()));
+    ++data_->readCalls;
+    const size_t end = std::min(data_->bytes.size(), data_->readFailAt);
+    const size_t readable = std::min(length, end - std::min(cursor_, end));
+    data_->readBytes += readable;
     if (readable > 0) std::copy_n(data_->bytes.data() + cursor_, readable, static_cast<uint8_t*>(output));
     cursor_ += readable;
     return static_cast<int>(readable);
@@ -111,6 +122,8 @@ class HalStorage {
     return true;
   }
 
+  long openHandles(const std::string& path) const { return files_.at(path).use_count() - 1; }
+  HostFileData& data(const std::string& path) { return *files_.at(path); }
   void failWritesAt(const std::string& path, size_t offset) { files_.at(path)->failAt = offset; }
   const std::vector<uint8_t>& bytes(const std::string& path) const { return files_.at(path)->bytes; }
   void put(const std::string& path, std::vector<uint8_t> bytes) {

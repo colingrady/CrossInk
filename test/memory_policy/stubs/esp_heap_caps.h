@@ -17,6 +17,7 @@ struct Heap {
   size_t largest;
   int fail = 0;
   size_t attempts = 0;
+  size_t failOnAttempt = 0;
 };
 inline Heap internal{1024 * 1024, 1024 * 1024, 1024 * 1024};
 inline Heap external{8 * 1024 * 1024, 8 * 1024 * 1024, 8 * 1024 * 1024};
@@ -41,6 +42,7 @@ inline void* heap_caps_malloc(size_t bytes, uint32_t caps) {
   if (caps == MALLOC_CAP_DEFAULT && fakeheap::defaultExternal) caps = MALLOC_CAP_SPIRAM;
   auto& h = fakeheap::heap(caps);
   ++h.attempts;
+  if (h.failOnAttempt == h.attempts) return nullptr;
   if (h.fail) {
     --h.fail;
     return nullptr;
