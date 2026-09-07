@@ -19,3 +19,9 @@ target_include_directories(SdFontBitmapStorageTest PRIVATE stubs ${REPO_ROOT}/li
 target_compile_definitions(SdFontBitmapStorageTest PRIVATE ARDUINO_ARCH_ESP32=1 CROSSINK_MEMORY_TEST=1)
 target_link_libraries(SdFontBitmapStorageTest PRIVATE crosspoint_test_common GTest::gtest_main)
 gtest_discover_tests(SdFontBitmapStorageTest PROPERTIES ENVIRONMENT "UBSAN_OPTIONS=halt_on_error=1")
+
+add_executable(CssArenaBackingTest CssArenaBackingTest.cpp ${REPO_ROOT}/lib/Epub/Epub/css/CssParser.cpp)
+target_include_directories(CssArenaBackingTest PRIVATE stubs ${REPO_ROOT}/lib/Memory ${REPO_ROOT}/lib/MemoryBudget ${REPO_ROOT}/lib/Epub/Epub/css)
+target_compile_definitions(CssArenaBackingTest PRIVATE ARDUINO_ARCH_ESP32=1 CROSSINK_MEMORY_TEST=1)
+target_link_libraries(CssArenaBackingTest PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(CssArenaBackingTest PROPERTIES ENVIRONMENT "UBSAN_OPTIONS=halt_on_error=1")
