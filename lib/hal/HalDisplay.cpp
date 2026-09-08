@@ -154,6 +154,14 @@ void HalDisplay::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, ui
                                        yStart, numRows);
 }
 
+bool HalDisplay::shouldSkipImageBlanking() const {
+  // CrossInk's extra white-image pass is redundant on UC8179. Its driver
+  // always supports async display; the existing query also excludes inverted
+  // output, a pending inversion transition, and an uninitialized driver.
+  return BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8179 &&
+         einkDisplay.supportsAsyncRefresh();
+}
+
 bool HalDisplay::supportsStripGrayscale() const { return einkDisplay.supportsStripGrayscale(); }
 
 uint16_t HalDisplay::getDisplayWidth() const { return einkDisplay.getDisplayWidth(); }

@@ -3069,6 +3069,15 @@ void GfxRenderer::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch
   display.writeGrayscalePlaneStrip(lsbPlane, scratch, static_cast<uint16_t>(yStart), static_cast<uint16_t>(numRows));
 }
 
+bool GfxRenderer::shouldSkipImageBlanking() const {
+#ifdef SIMULATOR
+  // The simulator has no UC8179 waveform/state model.
+  return false;
+#else
+  return display.shouldSkipImageBlanking();
+#endif
+}
+
 bool GfxRenderer::supportsStripGrayscale() const { return display.supportsStripGrayscale(); }
 
 void GfxRenderer::freeBwBufferChunks() {

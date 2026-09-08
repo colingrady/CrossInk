@@ -17,6 +17,8 @@
 
 ### Changed
 
+- UC8179 readers skip the firmware's extra image-page blanking refresh while preserving placeholders, cleanup refreshes, and text anti-aliasing.
+
 - EPUB grayscale rendering avoids repeated full-plane page visits and skips cached image pixels outside each screen strip.
 - EPUB reading uses available PSRAM for decompression, SD-font bitmaps, cached styles, and layout scratch while preserving internal memory for other work.
 - EPUB chapter indexing now starts with much smaller memory allocations and grows in bounded chunks, improving

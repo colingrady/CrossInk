@@ -6777,27 +6777,28 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
     return true;
   }
   if (pageHasImages) {
-    // Double FAST_REFRESH with selective image blanking (pablohc's technique):
-    // HALF_REFRESH sets particles too firmly for the grayscale LUT to adjust.
-    // Instead, blank only the image area and do two fast refreshes.
-    // Step 1: Display page with image area blanked (text appears, image area white)
-    // Step 2: Re-render with images and display again (images appear clean)
+    // Keep the legacy blank/base sequence unless the controller can transition
+    // directly to the complete image base.
     int16_t imgX, imgY, imgW, imgH;
     if (page->getImageBoundingBox(imgX, imgY, imgW, imgH)) {
-      // Blank the image before any panel update so a pending clean pass does
-      // not briefly show the decoded image before the final grayscale pass.
-      renderer.fillRect(imgX + orientedMarginLeft, imgY + orientedMarginTop, imgW, imgH, false);
-      // Image pages intentionally bypass the regular refresh cadence. Preserve
-      // a pending clean base before their double-FAST grayscale pipeline.
+      const bool directImageBase = renderer.shouldSkipImageBlanking();
+      // UC8179's base waveform transitions directly from the displayed page.
+      // Keep blanking for other controllers and for a pending strong cleanup.
+      const bool blankImage = !directImageBase || cleanImageBasePending;
+      if (blankImage) {
+        renderer.fillRect(imgX + orientedMarginLeft, imgY + orientedMarginTop, imgW, imgH, false);
+      }
       if (cleanImageBasePending) {
         renderer.displayBuffer(pagesUntilFullRefresh < 0 ? manualScreenRefreshMode() : HalDisplay::HALF_REFRESH);
         cleanImageBasePending = false;
       }
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-
-      // Re-render page content to restore images into the blanked area
-      // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
-      composePageBuffer();
+      if (!directImageBase) {
+        renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+      }
+      if (blankImage) {
+        // Restore the composed image after legacy blanking or strong cleanup.
+        composePageBuffer();
+      }
       // The restored image frame becomes the base for the grayscale image
       // planes below. On X3, use the same grayscale-aware base waveform as
       // text-only grayscale turns; other panels keep the FAST fallback behavior.
