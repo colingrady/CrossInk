@@ -43,6 +43,7 @@
 
 ### Fixed
 
+- X4 Pro USB uploads no longer inject task-watchdog errors into the serial transfer response.
 - Long-press Menu and Back shortcuts no longer pass their release into reader screens opened by the shortcut.
 - Mixed-direction EPUB paragraphs now retain their block reading direction when inline spans change direction.
 - End-of-book suggestions now receive input before reader shortcuts and automatic page turns.
