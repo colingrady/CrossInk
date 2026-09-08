@@ -17,6 +17,7 @@
 
 ### Changed
 
+- The web EPUB optimizer now prefers nearby authored page and section boundaries when splitting very large chapters.
 - Automatic reading-stat backups no longer rewrite an identical same-day file before sleep.
 - Reader resumes now defer Recent Books and KOReader credential loading until needed and avoid unchanged recent-book writes.
 - X3 readers now reuse a one-second USB power sample instead of repeatedly querying the battery gauge while idle.

@@ -390,8 +390,11 @@ bool EpubReaderMenuActivity::activateSelectedItem() {
   }
 
   if (selectedAction == MenuAction::CONTROLS_OPTIONS) {
+    if (beginGlobalSettingsEditCallback) beginGlobalSettingsEditCallback(beginGlobalSettingsEditContext);
     startActivityForResult(std::make_unique<ControlsOptionsActivity>(renderer, mappedInput),
                            [this](const ActivityResult&) {
+                             if (endGlobalSettingsEditCallback)
+                               endGlobalSettingsEditCallback(endGlobalSettingsEditContext);
                              ActivityResult result;
                              result.isCancelled = true;
                              result.data = makeMenuResult(-1);
@@ -434,7 +437,11 @@ bool EpubReaderMenuActivity::handleTouchInput() {
   if (mappedInput.wasTabTapped(tabIndex) && tabIndex >= 0) {
     if (mappedInput.hasTouchHardware() && tabIndex == static_cast<int>(TOUCH_LOCK_ICON_INDEX)) {
       SETTINGS.disableReaderTouchscreen = SETTINGS.disableReaderTouchscreen ? 0 : 1;
-      SETTINGS.saveToFile();
+      if (saveGlobalSettingsCallback) {
+        saveGlobalSettingsCallback(saveGlobalSettingsContext);
+      } else {
+        SETTINGS.saveToFile();
+      }
       requestUpdate();
       return true;
     }

@@ -17,6 +17,7 @@
 #include "EndOfBookOptions.h"
 #include "EpubReaderMenuActivity.h"
 #include "GlobalReadingStats.h"
+#include "ManualPageTurnQueue.h"
 #include "ReaderProgressSaveDebouncer.h"
 #include "activities/Activity.h"
 #include "components/OptionPopup.h"
@@ -147,6 +148,7 @@ class EpubReaderActivity final : public Activity {
   static constexpr uint8_t HEAP_SHAPE_REDRAW_DICT = 1U << 1;
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
+  ManualPageTurnQueue pendingManualPageTurns;
   unsigned long pageShownAtMs = 0UL;
   unsigned long lastRenderCompleteMs = 0UL;
   int idlePrewarmSpine = -1;
@@ -316,6 +318,7 @@ class EpubReaderActivity final : public Activity {
   std::string footnotePreviewCacheSuffix(EpubRenderMode renderMode, const std::string& anchor) const;
   void clearFootnotePreviewState();
   void silentIndexNextChapterIfNeeded(uint16_t viewportWidth, uint16_t viewportHeight);
+  void cancelSilentPrefetchForInput();
   bool restoreCurrentPageBufferAfterSilentIndex();
   // Larger batches are reserved for non-interactive work such as sleep-page preparation.
   static constexpr int BUILD_PAGES_PER_CHUNK = 8;
@@ -389,11 +392,13 @@ class EpubReaderActivity final : public Activity {
   void loadBookReaderSettings();
   void saveCurrentBookReaderSettings();
   void saveDictionaryFontForBook(const char* familyName, uint8_t pointSize);
-  void saveGlobalSettingsPreservingBookOverrides();
+  void persistReaderSdFontSettings();
+  bool saveGlobalSettingsPreservingBookOverrides();
   void beginGlobalSettingsEdit();
   void endGlobalSettingsEdit();
   static void saveReaderOptionsForBook(void* ctx);
   static void saveDictionaryFontForBookReader(void* ctx, const char* familyName, uint8_t pointSize);
+  static void persistReaderSdFontSettingsForBook(void* ctx);
   static void saveGlobalSettingsForBookReader(void* ctx);
   static void beginGlobalSettingsEditForBookReader(void* ctx);
   static void endGlobalSettingsEditForBookReader(void* ctx);
@@ -428,6 +433,11 @@ class EpubReaderActivity final : public Activity {
   // Opens the reader menu for the current position (short-press Confirm)
   void openReaderMenu();
   void applyOrientation(uint8_t orientation);
+  void requestManualPageTurn(bool isForwardTurn, const char* source);
+  bool drainPendingManualPageTurn();
+  void clearPendingManualPageTurns();
+  void finishManualPageTurnBrakeIfReady();
+  void cancelSilentNextChapterPrefetchForForwardTurn();
   void pageTurn(bool isForwardTurn, const char* source = "unknown");
   float getCurrentBookProgressPercent() const;
   void initializeCompletionPromptTrigger();
@@ -490,6 +500,7 @@ class EpubReaderActivity final : public Activity {
   bool isReaderActivity() const override { return true; }
   bool isEpubReaderActivity() const override { return true; }
   void onInputLockChanged(bool locked) override;
+  void onUserInput() override;
   bool handleQuickLockUnlock(QuickLockTrigger trigger) override;
   bool canSnapshotForSleepOverlay() const override { return true; }
   bool allowPowerAsConfirmInReaderMode() const override { return quickActionsPopup.isActive(); }
@@ -507,10 +518,11 @@ class EpubReaderActivity final : public Activity {
   std::string getCurrentBookTitle() const override { return epub ? epub->getTitle() : std::string{}; }
   bool getFrontlightPanelBookDetails(FrontlightPanelBookDetails& details) override;
   std::unique_ptr<Activity> createFrontlightReadingStatsActivity() override;
-  void onFrontlightPanelOpened() override { pauseReadingPaceTimer("frontlight_panel"); }
+  void onFrontlightPanelOpened() override;
   void onFrontlightPanelClosed() override;
   void onBackdropRenderedForOverlay() override { pageShownAtMs = 0UL; }
   void persistFrontlightPanelSettings() override { saveGlobalSettingsPreservingBookOverrides(); }
+  void persistGlobalSettings() override { saveGlobalSettingsPreservingBookOverrides(); }
   void onFrontlightGlobalSettingsOpened() override { beginGlobalSettingsEdit(); }
   void onFrontlightGlobalSettingsClosed() override { endGlobalSettingsEdit(); }
   bool handleFrontlightPanelResult(const FrontlightPanelResult& result) override;

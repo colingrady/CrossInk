@@ -98,6 +98,7 @@ constexpr char READER_SETTINGS_FILE_NAME[] = "/reader_settings.bin";
 constexpr char BALANCED_SECTION_CACHE_SUFFIX[] = "_balanced";
 constexpr char LIGHT_SECTION_CACHE_SUFFIX[] = "_light";
 constexpr unsigned long RENDER_MODE_TOAST_MS = 1500UL;
+constexpr unsigned long MIN_MANUAL_PAGE_TURN_GAP_MS = 200UL;
 // Shared dwell time for the transient bookmark/completed/tilt confirmations.
 constexpr unsigned long TRANSIENT_FEEDBACK_MS = 1000UL;
 constexpr unsigned long IDLE_SD_FONT_PREWARM_DELAY_MS = 400UL;
@@ -1508,11 +1509,14 @@ void EpubReaderActivity::resumeReadingPaceTimer(const char*) {
 
 void EpubReaderActivity::onInputLockChanged(const bool locked) {
   if (locked) {
+    clearPendingManualPageTurns();
     pauseReadingPaceTimer("quick_lock");
   } else {
     resumeReadingPaceTimer("quick_lock");
   }
 }
+
+void EpubReaderActivity::onUserInput() { cancelSilentPrefetchForInput(); }
 
 bool EpubReaderActivity::handleQuickLockUnlock(const QuickLockTrigger trigger) {
   if (trigger == QuickLockTrigger::LongMenu) {
@@ -2074,17 +2078,32 @@ void EpubReaderActivity::saveDictionaryFontForBook(const char* familyName, const
   saveBookReaderSettingsFile(epub->getCachePath(), data);
 }
 
-void EpubReaderActivity::saveGlobalSettingsPreservingBookOverrides() {
+void EpubReaderActivity::persistReaderSdFontSettings() {
+  if (bookHasCustomReaderSettings) {
+    saveCurrentBookReaderSettings();
+  } else {
+    // This book inherits the global font. Keep a repaired missing-font or
+    // legacy-size value in the global snapshot, while saveGlobalSettings...
+    // still keeps a separate per-book render-mode override out of the write.
+    globalReaderSettingsBeforeBook.readerFontPointSize = SETTINGS.readerFontPointSize;
+    std::strncpy(globalReaderSettingsBeforeBook.sdFontFamilyName, SETTINGS.sdFontFamilyName,
+                 sizeof(globalReaderSettingsBeforeBook.sdFontFamilyName) - 1);
+    globalReaderSettingsBeforeBook.sdFontFamilyName[sizeof(globalReaderSettingsBeforeBook.sdFontFamilyName) - 1] = '\0';
+    saveGlobalSettingsPreservingBookOverrides();
+  }
+}
+
+bool EpubReaderActivity::saveGlobalSettingsPreservingBookOverrides() {
   if (!restoreGlobalReaderSettingsOnExit) {
-    SETTINGS.saveToFile();
-    return;
+    return SETTINGS.saveToFile();
   }
 
   ReaderSettingsSnapshot activeReaderSettings;
   captureReaderSettings(activeReaderSettings);
   applyReaderSettings(globalReaderSettingsBeforeBook);
-  SETTINGS.saveToFile();
+  const bool saved = SETTINGS.saveToFile();
   applyReaderSettings(activeReaderSettings);
+  return saved;
 }
 
 void EpubReaderActivity::beginGlobalSettingsEdit() {
@@ -2122,6 +2141,11 @@ void EpubReaderActivity::saveDictionaryFontForBookReader(void* ctx, const char* 
   static_cast<EpubReaderActivity*>(ctx)->saveDictionaryFontForBook(familyName, pointSize);
 }
 
+void EpubReaderActivity::persistReaderSdFontSettingsForBook(void* ctx) {
+  if (!ctx) return;
+  static_cast<EpubReaderActivity*>(ctx)->persistReaderSdFontSettings();
+}
+
 void EpubReaderActivity::saveGlobalSettingsForBookReader(void* ctx) {
   if (!ctx) {
     return;
@@ -2155,6 +2179,7 @@ void EpubReaderActivity::onEnter() {
   captureGlobalReaderSettings();
   epub->setupCacheDir();
   loadBookReaderSettings();
+  sdFontSystem.setSettingsPersistenceCallback(persistReaderSdFontSettingsForBook, this);
   ensureReaderSdFontLoaded(renderer);
   ImageBlock::clearSessionRenderFailures();
   ImageBlock::setExtractor(epub.get(), [](void* context, const char* source, const char* destination) {
@@ -2279,6 +2304,8 @@ void EpubReaderActivity::onEnter() {
 }
 
 void EpubReaderActivity::onExit() {
+  sdFontSystem.setSettingsPersistenceCallback(nullptr, nullptr);
+  clearPendingManualPageTurns();
   mappedInput.setReaderTouchscreenOverride(false);
 
   // The extraction callback holds the Epub as a raw context pointer.
@@ -2375,6 +2402,7 @@ void EpubReaderActivity::onExit() {
 }
 
 void EpubReaderActivity::openReaderMenu() {
+  clearPendingManualPageTurns();
   int currentPage = 0;
   int totalPages = 0;
   float bookProgress = 0.0f;
@@ -2610,6 +2638,19 @@ bool EpubReaderActivity::transientFeedbackDismissed(const unsigned long showTime
 }
 
 void EpubReaderActivity::loop() {
+  bool rawTouchInput = false;
+#if CROSSINK_APP_CAP_TOUCH
+  int touchDownX = 0;
+  int touchDownY = 0;
+  rawTouchInput = mappedInput.wasScreenTouchDown(touchDownX, touchDownY) || mappedInput.wasScreenTouchReleased();
+#endif
+  const bool rawReaderInput = mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased() || rawTouchInput;
+  if (rawReaderInput) {
+    // This only cancels Full Section's optional next-chapter work. The input
+    // itself remains available to the normal reader routing below.
+    cancelSilentPrefetchForInput();
+  }
+
   if (quickActionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
   if (!epub) {
     // Should never happen
@@ -2637,8 +2678,7 @@ void EpubReaderActivity::loop() {
   // Read it once: wasReleased() consumes that suppression, and a second read
   // in this loop would otherwise turn the same release into a reader-menu open.
   const bool confirmReleased = mappedInput.wasReleased(MappedInputManager::Button::Confirm);
-  const bool userInputPending = mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased() || touch.tapped ||
-                                touch.prev || touch.next || mappedInput.wasScreenTouchReleased();
+  const bool userInputPending = rawReaderInput || touch.tapped || touch.prev || touch.next;
   if (userInputPending) {
     // Do not tear down the parser: suspending here would write a partial cache and
     // make the next build replay from page 0. Yield until the requested render starts.
@@ -2788,6 +2828,9 @@ void EpubReaderActivity::loop() {
   // End-of-Book screen reached (currentSpineIndex == spine count) means the book is
   // finished. Two independent finished-book features key off this same condition.
   const bool atEndOfBook = currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount();
+  if (atEndOfBook) {
+    clearPendingManualPageTurns();
+  }
 
   // Paged back into the book: release the end screen app and its theme tokens.
   if (!atEndOfBook && endOfBookOptions) {
@@ -2990,6 +3033,7 @@ void EpubReaderActivity::loop() {
 
     if (sideLongPressSkipsChapter && !sideButtonLongPressHandled && (prevLongPressed || nextLongPressed)) {
       sideButtonLongPressHandled = true;
+      clearPendingManualPageTurns();
       if (!nextLongPressed && section && section->currentPage > 0) {
         section->currentPage = 0;
         requestUpdate();
@@ -3057,6 +3101,7 @@ void EpubReaderActivity::loop() {
     if (!frontButtonLongPressHandled && (prevLongPressed || nextLongPressed)) {
       frontButtonLongPressHandled = true;
       if (SETTINGS.longPressButtonBehavior == CrossPointSettings::CHAPTER_SKIP) {
+        clearPendingManualPageTurns();
         if (currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount()) {
           if (nextLongPressed) {
             onGoHome();
@@ -3125,15 +3170,17 @@ void EpubReaderActivity::loop() {
   }
   prevTriggered = prevTriggered || shortPowerPrevious || releasedLongPowerPrevious;
   if (!prevTriggered && !nextTriggered) {
+    if (drainPendingManualPageTurn()) {
+      return;
+    }
     idlePrewarmNextPage();
     return;
   }
 
-  if (nextTriggered && silentPrefetchBuildActive.load(std::memory_order_relaxed)) {
-    // This turn still advances to the visible next page. The speculative build
-    // sees this at its next parser checkpoint and leaves no partial .bin behind.
-    silentPrefetchCancelRequested.store(true, std::memory_order_relaxed);
-    LOG_DBG("ERS", "Forward page turn requested while silent next-chapter indexing is busy; cancelling prefetch");
+  if (nextTriggered) {
+    // Tilt page turns do not produce a raw button or touch edge, but should
+    // still win over optional next-chapter indexing.
+    cancelSilentPrefetchForInput();
   }
 
   // At end of the book with no suggestion menu, forward button goes home and back
@@ -3172,6 +3219,7 @@ void EpubReaderActivity::loop() {
   }
 
   if (skipChapter) {
+    clearPendingManualPageTurns();
     if (!nextTriggered && section && section->currentPage > 0) {
       section->currentPage = 0;
       requestUpdate();
@@ -3205,6 +3253,7 @@ void EpubReaderActivity::loop() {
 
   // No current section, attempt to rerender the book
   if (!section) {
+    clearPendingManualPageTurns();
     requestUpdate();
     return;
   }
@@ -3213,28 +3262,7 @@ void EpubReaderActivity::loop() {
   if (shortPowerTurn || shortPowerPrevious || releasedLongPowerTurn || releasedLongPowerPrevious || heldLongPowerTurn) {
     pageTurnSource = "power";
   }
-  // Drop the manual turn if a render is still in flight, OR within a short window of the
-  // last turn. render() runs on its own task (renderTaskLoop) concurrently with
-  // input; a slow AA/image page display lags behind fast taps, and a second turn
-  // firing before the first commits its differential baseline writes the panel
-  // twice -> two overlapping page segments. RenderLock::peek() catches a render
-  // that has already taken the lock (mirrors the automatic-turn guard), but there
-  // is a brief window between requesting a turn and the render task acquiring the
-  // lock where peek() is still false, a mashed second tap slips through there,
-  // which is what still triggered after slow image pages. The lastPageTurnTime
-  // gap bridges that startup latency; after it, peek() takes over for the rest of
-  // the (variable-length) render. You can't turn faster than the panel refreshes,
-  // so dropping the extra tap (vs corrupting the frame) is correct; the next tap
-  // after the render finishes turns normally.
-  constexpr unsigned long kMinManualTurnGapMs = 200;
-  if (RenderLock::peek() || (millis() - lastPageTurnTime) < kMinManualTurnGapMs) {
-    return;
-  }
-  if (prevTriggered) {
-    pageTurn(false, pageTurnSource);
-  } else {
-    pageTurn(true, pageTurnSource);
-  }
+  requestManualPageTurn(!prevTriggered, pageTurnSource);
 }
 
 bool EpubReaderActivity::handleTwoFingerSwipeAction(const CrossPointSettings::TWO_FINGER_SWIPE_ACTION action) {
@@ -3261,6 +3289,7 @@ bool EpubReaderActivity::handleTwoFingerSwipeAction(const CrossPointSettings::TW
         targetSpine = previousChapterFirstSpineIndex;
       }
       if (activeFootnotePreview || targetSpine < 0 || targetSpine >= epub->getSpineItemsCount()) return true;
+      clearPendingManualPageTurns();
       {
         RenderLock lock(*this);
         nextPageNumber = 0;
@@ -3283,6 +3312,8 @@ void EpubReaderActivity::jumpToPercent(int percent) {
   if (!epub) {
     return;
   }
+
+  clearPendingManualPageTurns();
 
   // BookMetadataCache uses a shared seek-based FsFile for spine metadata lookups.
   // Hold the render/file mutex for the full jump calculation so menu-driven jumps
@@ -3358,6 +3389,7 @@ void EpubReaderActivity::jumpToPercent(int percent) {
 }
 
 void EpubReaderActivity::handleClippingJump(const ClippingJumpResult& clipping) {
+  clearPendingManualPageTurns();
   RenderLock lock(*this);
   clearFootnotePreviewState();
   currentSpineIndex = clipping.spineIndex;
@@ -4090,6 +4122,11 @@ bool EpubReaderActivity::getFrontlightPanelBookDetails(FrontlightPanelBookDetail
   return true;
 }
 
+void EpubReaderActivity::onFrontlightPanelOpened() {
+  clearPendingManualPageTurns();
+  pauseReadingPaceTimer("frontlight_panel");
+}
+
 void EpubReaderActivity::onFrontlightPanelClosed() {
   globalStats = GlobalReadingStats::load();
   stats = epub ? BookReadingStats::load(epub->getCachePath()) : stats;
@@ -4148,6 +4185,7 @@ bool EpubReaderActivity::restorePendingOverlay(const PendingOverlayResume& resum
 }
 
 void EpubReaderActivity::reindexCurrentSection() {
+  clearPendingManualPageTurns();
   const bool restorePreviewPosition = activeFootnotePreview;
   {
     RenderLock lock(*this);
@@ -4174,6 +4212,7 @@ void EpubReaderActivity::reindexCurrentSection() {
 }
 
 void EpubReaderActivity::openFileTransfer() {
+  clearPendingManualPageTurns();
   pauseReadingPaceTimer("file_transfer");
   if (epub && section) {
     saveProgress(currentSpineIndex, section->currentPage, section->estimatedTotalPages());
@@ -4184,6 +4223,7 @@ void EpubReaderActivity::openFileTransfer() {
 
 void EpubReaderActivity::openAutoPageTurnIntervalPicker(const bool ignoreInitialConfirmRelease,
                                                         const bool returnToReaderMenu) {
+  clearPendingManualPageTurns();
   pauseReadingPaceTimer("auto_turn_interval");
   startActivityForResult(
       std::make_unique<IntervalSelectionActivity>(
@@ -4579,6 +4619,7 @@ void EpubReaderActivity::resetCurrentBookStatsAfterDelete() {
 void EpubReaderActivity::executeReaderQuickAction(CrossPointSettings::LONG_PRESS_MENU_ACTION action,
                                                   const bool dictionaryLookupFramebufferContainsPage,
                                                   const QuickLockTrigger quickLockTrigger) {
+  clearPendingManualPageTurns();
   switch (action) {
     case CrossPointSettings::LONG_MENU_SLEEP:
       enterDeepSleep();
@@ -4701,10 +4742,10 @@ bool EpubReaderActivity::handleShortcutAction(const uint8_t rawAction) {
     case CrossPointSettings::SHORT_PWRBTN::IGNORE:
       return true;
     case CrossPointSettings::SHORT_PWRBTN::PAGE_TURN:
-      pageTurn(true, "home_button");
+      requestManualPageTurn(true, "home_button");
       return true;
     case CrossPointSettings::SHORT_PWRBTN::PREVIOUS_PAGE:
-      pageTurn(false, "home_button");
+      requestManualPageTurn(false, "home_button");
       return true;
     case CrossPointSettings::SHORT_PWRBTN::NEARBY_POSITION_SYNC:
       onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::NEARBY_POSITION_SYNC);
@@ -4787,10 +4828,10 @@ bool EpubReaderActivity::handleShortcutAction(const uint8_t rawAction) {
 bool EpubReaderActivity::handleShortcutAction(const CrossPointSettings::SHORT_PWRBTN action) {
   switch (action) {
     case CrossPointSettings::SHORT_PWRBTN::PAGE_TURN:
-      pageTurn(true, "shortcut");
+      requestManualPageTurn(true, "shortcut");
       return true;
     case CrossPointSettings::SHORT_PWRBTN::PREVIOUS_PAGE:
-      pageTurn(false, "shortcut");
+      requestManualPageTurn(false, "shortcut");
       return true;
     case CrossPointSettings::SHORT_PWRBTN::NEARBY_POSITION_SYNC:
       onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::NEARBY_POSITION_SYNC);
@@ -4867,6 +4908,7 @@ bool EpubReaderActivity::handleShortcutAction(const CrossPointSettings::SHORT_PW
 }
 
 void EpubReaderActivity::openQuickActionsPopup() {
+  clearPendingManualPageTurns();
   QuickActions::showConfiguredPopup(
       quickActionsPopup, [this] { requestUpdate(); },
       [this](const auto action) {
@@ -4891,6 +4933,7 @@ void EpubReaderActivity::openQuickActionsPopup() {
 }
 
 void EpubReaderActivity::executeFootnoteQuickAction(const bool suppressInitialPowerRelease) {
+  clearPendingManualPageTurns();
   if (footnoteDepth > 0 && SETTINGS.pwrBtnFootnoteBack) {
     restoreSavedPosition();
     return;
@@ -5171,7 +5214,7 @@ void EpubReaderActivity::showTiltPageTurnFeedback(bool enabled) {
 void EpubReaderActivity::toggleHomeButtonInReader() {
   if (!gpio.hasHomeKey()) return;
   SETTINGS.homeButtonInReaderEnabled = SETTINGS.homeButtonInReaderEnabled ? 0 : 1;
-  if (!SETTINGS.saveToFile()) {
+  if (!saveGlobalSettingsPreservingBookOverrides()) {
     LOG_ERR("ERS", "Failed to save Home button reader setting");
   }
   mappedInput.clearDeferredHomeGesture();
@@ -5258,6 +5301,8 @@ void EpubReaderActivity::applyOrientation(const uint8_t orientation) {
     return;
   }
 
+  clearPendingManualPageTurns();
+
   {
     RenderLock lock(*this);
 
@@ -5290,6 +5335,7 @@ uint16_t EpubReaderActivity::getAutoPageTurnIntervalSeconds() const {
 }
 
 void EpubReaderActivity::setAutoPageTurnIntervalSeconds(uint16_t seconds) {
+  clearPendingManualPageTurns();
   if (seconds == 0) {
     automaticPageTurnActive = false;
     return;
@@ -5327,6 +5373,62 @@ void EpubReaderActivity::setAutoPageTurnIntervalSeconds(uint16_t seconds) {
   }
 }
 
+void EpubReaderActivity::requestManualPageTurn(const bool isForwardTurn, const char* source) {
+  finishManualPageTurnBrakeIfReady();
+  const ManualPageTurnRequest request{isForwardTurn, source};
+  if (pendingManualPageTurns.hasPending()) {
+    pendingManualPageTurns.enqueue(request);
+    return;
+  }
+
+  if (RenderLock::peek() || (millis() - lastPageTurnTime) < MIN_MANUAL_PAGE_TURN_GAP_MS) {
+    pendingManualPageTurns.enqueue(request);
+    return;
+  }
+
+  pageTurn(isForwardTurn, source);
+}
+
+bool EpubReaderActivity::drainPendingManualPageTurn() {
+  finishManualPageTurnBrakeIfReady();
+  if (!pendingManualPageTurns.hasPending() || RenderLock::peek() ||
+      (millis() - lastPageTurnTime) < MIN_MANUAL_PAGE_TURN_GAP_MS) {
+    return false;
+  }
+
+  ManualPageTurnRequest request;
+  if (!pendingManualPageTurns.takeNext(request)) return false;
+  if (!section ||
+      (!activeFootnotePreview && !request.isForward && currentSpineIndex == 0 && section->currentPage == 0)) {
+    clearPendingManualPageTurns();
+    return false;
+  }
+
+  if (request.isForward) cancelSilentNextChapterPrefetchForForwardTurn();
+  pendingManualPageTurns.markDispatched(request);
+  pageTurn(request.isForward, request.source);
+  return true;
+}
+
+void EpubReaderActivity::clearPendingManualPageTurns() { pendingManualPageTurns.clear(); }
+
+void EpubReaderActivity::finishManualPageTurnBrakeIfReady() {
+  if (pendingManualPageTurns.hasDispatched() && !RenderLock::peek() &&
+      (millis() - lastPageTurnTime) >= MIN_MANUAL_PAGE_TURN_GAP_MS) {
+    pendingManualPageTurns.finishDispatched();
+  }
+}
+
+void EpubReaderActivity::cancelSilentNextChapterPrefetchForForwardTurn() {
+  if (!silentPrefetchBuildActive.load(std::memory_order_relaxed)) return;
+
+  // The visible turn takes precedence over speculative next-chapter indexing.
+  // The prefetch build sees this at its next parser checkpoint and leaves no
+  // partial .bin behind.
+  silentPrefetchCancelRequested.store(true, std::memory_order_relaxed);
+  LOG_DBG("ERS", "Forward page turn requested while silent next-chapter indexing is busy; cancelling prefetch");
+}
+
 void EpubReaderActivity::pageTurn(bool isForwardTurn, const char* source) {
   pageLoadRetryCount = 0;
   if (activeFootnotePreview) {
@@ -5362,6 +5464,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn, const char* source) {
       section->currentPage++;
     } else {
       if (shouldQueueCompletionPromptOnChapterExit()) {
+        clearPendingManualPageTurns();
         completionPromptQueued = true;
         requestUpdate();
         return;
@@ -6352,6 +6455,13 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   preparedNextSpineIndex = nextSpineIndex;
   preparedNextViewportWidth = viewportWidth;
   preparedNextViewportHeight = viewportHeight;
+}
+
+void EpubReaderActivity::cancelSilentPrefetchForInput() {
+  if (silentPrefetchBuildActive.load(std::memory_order_relaxed) &&
+      !silentPrefetchCancelRequested.exchange(true, std::memory_order_relaxed)) {
+    LOG_DBG("ERS", "Reader input requested while silent next-chapter indexing is busy; cancelling prefetch");
+  }
 }
 
 bool EpubReaderActivity::restoreCurrentPageBufferAfterSilentIndex() {
@@ -7402,6 +7512,8 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
     return;
   }
 
+  clearPendingManualPageTurns();
+
   // Internal links are collected with footnotes so their rendered words can
   // be tapped. A destination declared in the book TOC is a chapter jump,
   // though: it must replace the current chapter instead of opening a preview.
@@ -7445,6 +7557,7 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
 void EpubReaderActivity::restoreSavedPosition() {
   pageLoadRetryCount = 0;
   if (footnoteDepth <= 0) return;
+  clearPendingManualPageTurns();
   footnoteDepth--;
   const auto& pos = savedPositions[footnoteDepth];
 

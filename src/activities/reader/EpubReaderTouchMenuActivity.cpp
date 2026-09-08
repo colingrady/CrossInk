@@ -1172,7 +1172,11 @@ void EpubReaderTouchMenuActivity::activateRow(const RowId row) {
     case RowId::Controls:
       commitSettings();
       if (auto controls = makeUniqueNoThrow<ControlsOptionsActivity>(renderer, mappedInput)) {
-        startActivityForResult(std::move(controls), [this](const ActivityResult&) { requestUpdate(); });
+        if (beginGlobalSettingsEditCallback) beginGlobalSettingsEditCallback(beginGlobalSettingsEditContext);
+        startActivityForResult(std::move(controls), [this](const ActivityResult&) {
+          if (endGlobalSettingsEditCallback) endGlobalSettingsEditCallback(endGlobalSettingsEditContext);
+          requestUpdate();
+        });
       }
       return;
     case RowId::TextAa:
