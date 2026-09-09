@@ -1,6 +1,8 @@
 _language_name: "Suomi"
 _language_code: "FI"
 _order: "14"
+STR_PIN_AS_FAVORITE: "Aseta lepotilan näyttö"
+STR_UNPIN_AS_FAVORITE: "Poista lepotilan näyttö"
 STR_SET_AS_BOOT_SCREEN: "Käynnistysnäyttö"
 STR_CLEAR_BOOT_SCREEN: "Tyhjennä näyttö"
 STR_DICTIONARY: "Sanakirja"

@@ -1,6 +1,8 @@
 _language_name: "Slovenčina"
 _language_code: "SK"
 _order: "25"
+STR_PIN_AS_FAVORITE: "Nastaviť obrazovku spánku"
+STR_UNPIN_AS_FAVORITE: "Zrušiť obrazovku spánku"
 STR_SET_AS_BOOT_SCREEN: "Úvodná obrazovka"
 STR_CLEAR_BOOT_SCREEN: "Vymazať úvod"
 STR_DICTIONARY: "Slovník"

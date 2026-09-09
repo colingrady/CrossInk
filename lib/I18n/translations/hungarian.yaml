@@ -1,6 +1,8 @@
 _language_name: "Magyar"
 _language_code: "HU"
 _order: "19"
+STR_PIN_AS_FAVORITE: "Alvóképernyő beállítása"
+STR_UNPIN_AS_FAVORITE: "Alvóképernyő törlése"
 STR_SET_AS_BOOT_SCREEN: "Indítóképernyő"
 STR_CLEAR_BOOT_SCREEN: "Képernyő törlése"
 STR_DICTIONARY: "Szótár"

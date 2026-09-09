@@ -1,6 +1,8 @@
 _language_name: "עברית"
 _language_code: "HE"
 _order: "23"
+STR_PIN_AS_FAVORITE: "הגדרת מסך שינה"
+STR_UNPIN_AS_FAVORITE: "ביטול מסך שינה"
 STR_SET_AS_BOOT_SCREEN: "מסך אתחול"
 STR_CLEAR_BOOT_SCREEN: "נקה מסך"
 STR_DICTIONARY: "מילון"

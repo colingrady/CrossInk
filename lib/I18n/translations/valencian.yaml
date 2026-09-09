@@ -1,6 +1,8 @@
 _language_name: "Valencià"
 _language_code: "CAV"
 _order: "22"
+STR_PIN_AS_FAVORITE: "Establir pantalla de repòs"
+STR_UNPIN_AS_FAVORITE: "Llevar pantalla de repòs"
 STR_SET_AS_BOOT_SCREEN: "Pantalla inici"
 STR_CLEAR_BOOT_SCREEN: "Esborrar inici"
 STR_DICTIONARY: "Diccionari"
