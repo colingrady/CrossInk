@@ -197,7 +197,7 @@ struct ReaderSettingsBin {
 
 ## `/.crosspoint/clippings/<bookType>_<crc32(path)>.bin`
 
-### Versions 1-3
+### Versions 1-4
 
 Clipping files store the per-book EPUB clipping list used by the reader. A
 saved clipping is also what CrossInk renders as an in-reader highlight; there is
@@ -215,7 +215,7 @@ example:
 
 Binary layout:
 
-- `[0]` version (`1`, `2`, or current version `3`)
+- `[0]` version (`1`, `2`, `3`, or current version `4`)
 - `[1-2]` clipping count (`uint16_t` LE, maximum `256`)
 - book title (`String`)
 - book author (`String`)
@@ -230,12 +230,13 @@ Binary layout:
   - `wordCount` (`uint16_t` LE)
   - `paragraphIndex` (`uint16_t` LE, `UINT16_MAX` when unavailable)
   - `timestamp` (`uint32_t` LE, seconds since firmware boot when saved)
-  - version 3 only: reader layout signature (`uint32_t` LE; font, spacing,
+  - versions 3-4: reader layout signature (`uint32_t` LE; font, spacing,
     viewport, and other section-layout inputs)
+  - version 4: table selection (`uint16_t` LE; `UINT16_MAX` for non-table text)
   - `chapterTitle` (`char[48]`, null-terminated/truncated)
   - version 1: selected text (`String`; legacy files were written with a
     `512`-byte in-app limit)
-  - versions 2-3: selected-text length (`uint16_t` LE) followed by that many
+  - versions 2-4: selected-text length (`uint16_t` LE) followed by that many
     UTF-8 bytes (the current in-app limit is `4096` bytes, defined by
     `CLIPPING_TEXT_MAX`)
 
@@ -253,9 +254,9 @@ survive font, layout, or page-count changes when possible.
 Version 3 records which reader layout produced the numeric page/word anchor.
 When that signature differs, CrossInk ignores the stale numeric range and
 matches the saved text instead, including when both layouts happen to have the
-same total page count. Versions 1-2 retain their numeric fast path until the
-reader sees a relayout, when it stamps the previously active layout before
-rebuilding.
+same total page count. Legacy records without a layout signature use text
+matching rather than trusting ambiguous numeric ranges. Version 4 adds the
+table selection field; versions 1-3 remain readable.
 
 Creating a clipping also appends a Kindle-style export entry to
 `/My Clippings.txt` on the SD-card root. That text export can keep up to `2000`
@@ -309,6 +310,12 @@ because internal EPUB links now preserve CSS superscript and subscript styles,
 changing their cached word-style flags and page layout. Complete files use
 version byte `66`, and suspended partials use sentinel byte `0xF6`.
 
+The stable v1.5.1 release retains these identifiers from RC6. Do not normalize
+published RC versions to the previous stable version plus one: v1.5.0 used
+`60` / `0xF9`, and RC4 already shipped `61` / `0xF8` with older layout output.
+Reusing those identifiers could accept stale RC caches as current. Per-book
+reader settings likewise retain version `9` and their version 7/8 migrations.
+
 ### Version 62
 
 Version 62 stores one compact source-whitespace bit per word in serialized text
@@ -319,7 +326,7 @@ suspended section caches rebuild together; complete files use version byte
 
 ### Version 61
 
-Version 61 is the v1.5.1 cache update. It stores `protectedImageUnits`
+Version 61 was an earlier v1.5.1 release-candidate cache update. It stores `protectedImageUnits`
 (`uint32_t` LE) after `pageCount`, so image-heavy sections estimate their
 remaining non-image pages accurately. It also updates table fragments and
 geometry, oversized-word wrapping, inline-image margins, and ruby continuation

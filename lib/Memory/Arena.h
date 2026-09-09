@@ -156,7 +156,7 @@ struct Arena {
   }
 
  private:
-  ArenaBacking backing_;
+  ArenaBacking backing_ = ArenaBacking::Default;
 
   ArenaSlab* allocSlab(const size_t dataSize) {
     if (dataSize > SIZE_MAX - sizeof(ArenaSlab)) return nullptr;
@@ -175,8 +175,7 @@ struct Arena {
     const auto pool = byteBufferPool(storage.get());
     // Ownership transfers to the slab chain; release/clear/restore use the
     // matching capability deleter, including mixed-pool fallback chains.
-    auto* s = ::new (storage.release()) ArenaSlab{nullptr, dataSize, 0, pool};
-    return s;
+    return ::new (storage.release()) ArenaSlab{nullptr, dataSize, 0, pool};
   }
 
   static void freeSlab(ArenaSlab* slab) { HeapByteBufferDeleter{}(reinterpret_cast<uint8_t*>(slab)); }

@@ -17,12 +17,12 @@ constexpr size_t EPUB_INFLATE_INTERNAL_RESERVE = 16U * 1024U;
 constexpr size_t EPUB_FONT_INTERNAL_RESERVE = 40U * 1024U;
 constexpr size_t EPUB_LAYOUT_INTERNAL_RESERVE = 44U * 1024U;
 
-inline bool admits(const ByteHeapSnapshot heap, const PoolRequirement need) {
+inline bool admits(const ByteHeapSnapshot& heap, const PoolRequirement& need) {
   return need.bytes <= heap.free && need.reserve <= heap.free - need.bytes && need.largest <= heap.largest;
 }
 
-inline bool admitsOperation(const ByteHeapSnapshot internal, const ByteHeapSnapshot external,
-                            const PoolRequirement internalNeed, const PoolRequirement externalNeed) {
+inline bool admitsOperation(const ByteHeapSnapshot& internal, const ByteHeapSnapshot& external,
+                            const PoolRequirement& internalNeed, const PoolRequirement& externalNeed) {
   return admits(internal, internalNeed) && admits(external, externalNeed);
 }
 

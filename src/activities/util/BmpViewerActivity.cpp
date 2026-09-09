@@ -328,9 +328,9 @@ void BmpViewerActivity::showContextMenu() {
                    isPinned ? StrId::STR_UNPIN_AS_FAVORITE : StrId::STR_PIN_AS_FAVORITE});
 
   if (FsHelpers::hasBmpExtension(filePath)) {
-    const bool isPinned = APP_STATE.favoriteBootImagePath == filePath;
-    items.push_back({isPinned ? FileBrowserAction::UnpinBootFavorite : FileBrowserAction::PinBootFavorite,
-                     isPinned ? StrId::STR_CLEAR_BOOT_SCREEN : StrId::STR_SET_AS_BOOT_SCREEN});
+    const bool isBootPinned = APP_STATE.favoriteBootImagePath == filePath;
+    items.push_back({isBootPinned ? FileBrowserAction::UnpinBootFavorite : FileBrowserAction::PinBootFavorite,
+                     isBootPinned ? StrId::STR_CLEAR_BOOT_SCREEN : StrId::STR_SET_AS_BOOT_SCREEN});
   }
 
   startActivityForResult(std::make_unique<FileBrowserActionActivity>(renderer, mappedInput, imageDisplayName(filePath),
