@@ -224,13 +224,15 @@ EpdFontFamily bitter16FontFamily(&bitter16RegularFont, &bitter16BoldFont, &bitte
 EpdFont smallFont(&inter_8_regular);
 EpdFontFamily smallFontFamily(&smallFont);
 
+const EpdFont uiSymbols10Font(&ui_symbols_10);
+
 EpdFont ui10RegularFont(&inter_10_regular);
 EpdFont ui10BoldFont(&inter_10_bold);
-EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
+EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont, nullptr, nullptr, &uiSymbols10Font);
 
 EpdFont ui12RegularFont(&inter_12_regular);
 EpdFont ui12BoldFont(&inter_12_bold);
-EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
+EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont, nullptr, nullptr, &uiSymbols10Font);
 
 const char* resetReasonName(const esp_reset_reason_t reason) {
   switch (reason) {
@@ -1405,7 +1407,7 @@ void setup() {
   // Without either, retain the fast splashless resume path.
   bool hasBootScreenDirectory = false;
   bool hasPinnedBootScreen = false;
-  if (isSleepWake && !APP_STATE.showBootScreen) {
+  if (SETTINGS.customBootscreenEnabled && isSleepWake && !APP_STATE.showBootScreen) {
     std::string bootScreenDirectory;
     hasBootScreenDirectory = ImageFolderIndex::resolveBootScreenDirectory(bootScreenDirectory);
     hasPinnedBootScreen = !APP_STATE.favoriteBootImagePath.empty() &&
@@ -1589,9 +1591,13 @@ void setup() {
   }
 
   if (restoreQuickLockAfterWake) {
-    // Render the reconstructed route first, then draw the badge. The pending
-    // wake release stays swallowed by the main loop, so it cannot unlock the
-    // restored lock immediately.
+    // Finish queued navigation (including Reader -> EPUB/TXT/XTC) before
+    // locking: the locked main loop intentionally does not dispatch activities.
+    // Waiting for a render alone would paint the temporary Reader loader and
+    // strand its pending transition, losing the page and its orientation.
+    activityManager.loop();
+    // Paint the reconstructed route before saving the badge backdrop. The wake
+    // release remains swallowed, so it cannot immediately unlock the device.
     (void)activityManager.requestUpdateAndWait();
     buttonShortcutController.restoreQuickLock(millis(), quickLockResumeTrigger);
     notifyQuickLockChanged(true);

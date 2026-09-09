@@ -874,11 +874,11 @@ void ActivityManager::persistGlobalSettings() {
     currentActivity->persistGlobalSettings();
     return;
   }
-  for (auto it = stackActivities.rbegin(); it != stackActivities.rend(); ++it) {
-    if (*it && (*it)->isEpubReaderActivity()) {
-      (*it)->persistGlobalSettings();
-      return;
-    }
+  const auto reader = std::find_if(stackActivities.rbegin(), stackActivities.rend(),
+                                   [](const auto& activity) { return activity && activity->isEpubReaderActivity(); });
+  if (reader != stackActivities.rend()) {
+    (*reader)->persistGlobalSettings();
+    return;
   }
   if (currentActivity) {
     currentActivity->persistGlobalSettings();

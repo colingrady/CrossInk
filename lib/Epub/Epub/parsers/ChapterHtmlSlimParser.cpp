@@ -2175,9 +2175,15 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
           return;
         }
 
+        uint16_t optimizerWidth = 0;
+        uint16_t optimizerHeight = 0;
+        const bool dimensionsFromOptimizer =
+            self->epub->getOptimizerImageDimensions(resolvedPath, optimizerWidth, optimizerHeight);
+
         {
           const auto releaseHeapBefore = MemoryBudget::snapshot();
-          if (MemoryBudget::shouldReleaseSdFontCachesForEpubInlineImage(releaseHeapBefore) &&
+          if (!dimensionsFromOptimizer &&
+              MemoryBudget::shouldReleaseSdFontCachesForEpubInlineImage(releaseHeapBefore) &&
               self->renderer.releaseSdCardFontForLowMemory(self->fontId, /*preserveAdvanceTable=*/true)) {
             const auto releaseHeapAfter = MemoryBudget::snapshot();
             LOG_DBG("EHP", "Released SD font caches before image extraction: free=%u->%u maxAlloc=%u->%u src=%s",
@@ -2190,9 +2196,15 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
             return;
           } else {
             if (ImageDecoderFactory::isFormatSupported(resolvedPath)) {
-              // Unsupported formats are skipped regardless of heap, so only
-              // formats we can render should trip the low-memory image fallback.
-              if (!MemoryBudget::hasHeapForEpubInlineImage("EHP", src.c_str())) {
+              // Optimizer PXC files render without a decoder. Ordinary images
+              // retain the existing guard before any fallback extraction.
+              if (dimensionsFromOptimizer) {
+                if (!MemoryBudget::hasHeapForOptimizerPxcImage("EHP", src.c_str())) {
+                  self->lowMemoryImageFallback = true;
+                  self->skipCurrentElement();
+                  return;
+                }
+              } else if (!MemoryBudget::hasHeapForEpubInlineImage("EHP", src.c_str())) {
                 self->lowMemoryImageFallback = true;
                 self->skipCurrentElement();
                 return;
@@ -2209,10 +2221,14 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
               // Read just enough compressed data to find dimensions. The full
               // image remains inside the EPUB until its page is first rendered.
               ImageDimensions dims = {0, 0};
+              if (dimensionsFromOptimizer) {
+                dims = {static_cast<int16_t>(optimizerWidth), static_cast<int16_t>(optimizerHeight)};
+              }
               ImageDimsProbe headerProbe;
               bool gotDimensions =
-                  self->epub->readItemContentsToStream(resolvedPath, headerProbe, 1024, /*allowEarlyStop=*/true) &&
-                  headerProbe.getDimensions(dims);
+                  dimensionsFromOptimizer || (self->epub->readItemContentsToStream(resolvedPath, headerProbe, 1024,
+                                                                                   /*allowEarlyStop=*/true) &&
+                                              headerProbe.getDimensions(dims));
               std::string sourcePath;
               if (gotDimensions) {
                 sourcePath = resolvedPath;
@@ -2229,13 +2245,6 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
               }
 
               if (gotDimensions) {
-                if (!MemoryBudget::hasHeapForEpubInlineImage("EHP", cachedImagePath.c_str())) {
-                  self->lowMemoryImageFallback = true;
-                  Storage.remove(cachedImagePath.c_str());
-                  self->skipCurrentElement();
-                  return;
-                }
-
                 int displayWidth = 0;
                 int displayHeight = 0;
                 const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
@@ -2330,6 +2339,16 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
 
                   displayWidth = (int)(dims.width * scale);
                   displayHeight = (int)(dims.height * scale);
+                }
+
+                if ((!dimensionsFromOptimizer &&
+                     !MemoryBudget::hasHeapForEpubInlineImage("EHP", cachedImagePath.c_str())) ||
+                    (dimensionsFromOptimizer &&
+                     !MemoryBudget::hasHeapForOptimizerPxcImage("EHP", cachedImagePath.c_str()))) {
+                  self->lowMemoryImageFallback = true;
+                  if (sourcePath.empty()) Storage.remove(cachedImagePath.c_str());
+                  self->skipCurrentElement();
+                  return;
                 }
 
                 // Flush any pending text block so it appears before the image

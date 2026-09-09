@@ -7,7 +7,6 @@
 #include <I18n.h>
 
 #include <algorithm>
-#include <cctype>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -31,22 +30,6 @@ std::string imageDisplayName(const std::string& path) {
   const size_t filenameStart = path.find_last_of('/') + 1;
   const size_t extensionStart = path.find_last_of('.');
   return path.substr(filenameStart, extensionStart - filenameStart);
-}
-
-bool equalsIgnoreCase(const std::string& a, const std::string& b) {
-  if (a.length() != b.length()) return false;
-  for (size_t i = 0; i < a.length(); ++i) {
-    if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool isSleepFavoriteFolder(const std::string& imagePath) {
-  const std::string folder = FsHelpers::extractFolderPath(imagePath);
-  return equalsIgnoreCase(folder, "/sleep") || equalsIgnoreCase(folder, "/.sleep") ||
-         folder == APP_STATE.preferredSleepFolderPath;
 }
 
 void drawImageError(GfxRenderer& renderer, const MappedInputManager& mappedInput, const char* message) {
@@ -274,6 +257,15 @@ void BmpViewerActivity::pinSleepFavorite() {
     return;
   }
   LOG_INF("BmpViewer", "Pinned favorite sleep image: %s", filePath.c_str());
+
+  // Keep the context-menu action consistent with Confirm: PNG sleep images
+  // only render in Page Overlay mode.
+  if (FsHelpers::hasPngExtension(filePath) && SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY) {
+    SETTINGS.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY;
+    if (!SETTINGS.saveToFile()) {
+      LOG_ERR("BmpViewer", "Failed to save Page Overlay mode for PNG sleep image");
+    }
+  }
 }
 
 void BmpViewerActivity::unpinSleepFavorite() {
@@ -331,16 +323,14 @@ void BmpViewerActivity::showContextMenu() {
     items.push_back({FileBrowserAction::SendNearby, StrId::STR_SEND_NEARBY_BOOK});
   }
 
-  if (isSleepFavoriteFolder(filePath)) {
-    const bool isPinned = APP_STATE.favoriteSleepImagePath == filePath;
-    items.push_back({isPinned ? FileBrowserAction::UnpinFavorite : FileBrowserAction::PinFavorite,
-                     isPinned ? StrId::STR_UNPIN_AS_FAVORITE : StrId::STR_PIN_AS_FAVORITE});
-  }
+  const bool isPinned = APP_STATE.favoriteSleepImagePath == filePath;
+  items.push_back({isPinned ? FileBrowserAction::UnpinFavorite : FileBrowserAction::PinFavorite,
+                   isPinned ? StrId::STR_UNPIN_AS_FAVORITE : StrId::STR_PIN_AS_FAVORITE});
 
   if (FsHelpers::hasBmpExtension(filePath)) {
-    const bool isPinned = APP_STATE.favoriteBootImagePath == filePath;
-    items.push_back({isPinned ? FileBrowserAction::UnpinBootFavorite : FileBrowserAction::PinBootFavorite,
-                     isPinned ? StrId::STR_CLEAR_BOOT_SCREEN : StrId::STR_SET_AS_BOOT_SCREEN});
+    const bool isBootPinned = APP_STATE.favoriteBootImagePath == filePath;
+    items.push_back({isBootPinned ? FileBrowserAction::UnpinBootFavorite : FileBrowserAction::PinBootFavorite,
+                     isBootPinned ? StrId::STR_CLEAR_BOOT_SCREEN : StrId::STR_SET_AS_BOOT_SCREEN});
   }
 
   startActivityForResult(std::make_unique<FileBrowserActionActivity>(renderer, mappedInput, imageDisplayName(filePath),

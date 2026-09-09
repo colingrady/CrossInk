@@ -210,8 +210,10 @@ void XtcReaderActivity::loop() {
                        (statusBarMode == CrossPointSettings::XTC_STATUS_BAR_MODE::XTC_STATUS_BAR_BOTTOM &&
                         ReaderUtils::isBottomStatusBarTap(renderer, touch.y, statusBarHeight)));
   if (tappedStatusBar) {
-    statusBarVisible = !statusBarVisible;
-    requestUpdate();
+    if (SETTINGS.tapToHideStatusBar) {
+      statusBarVisible = !statusBarVisible;
+      requestUpdate();
+    }
     return;
   }
 

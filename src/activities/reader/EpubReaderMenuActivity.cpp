@@ -682,8 +682,8 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   const int tabBarHeight = readerMenuTabBarHeight(metrics.tabBarHeight, hasTouch);
   const bool tabsAtBottom = readerMenuTabsAtBottom(mappedInput);
 
-  // Header via GUI.drawHeader (already FreeInkUI-themed) for the battery
-  // indicator; the rest of the screen renders through the app.
+  // The menu is a system screen, not reading content: its status indicators
+  // stay visible unless their setting is Hide Always.
   const Rect headerRect = readerMenuHeaderRect(renderer, mappedInput);
   if (mappedInput.hasTouchHardware()) {
     const Rect homeRect = readerMenuHeaderActionRect(headerRect, metrics);
@@ -694,7 +694,7 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
     drawSdkIcon(uiTarget, icon_home_24, homeRect.x + (homeRect.width - tabIconSize) / 2,
                 homeRect.y + (homeRect.height - tabIconSize) / 2);
   } else {
-    GUI.drawHeader(renderer, headerRect, title.c_str(), nullptr, true);
+    GUI.drawHeader(renderer, headerRect, title.c_str());
   }
 
   // Progress summary

@@ -1247,6 +1247,13 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
     return;
   }
 
+  if (page->hasImages()) {
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    page->prepareImageCaches();
+    loan.end();
+    renderer.clearScreen(ReaderUtils::readerBackgroundColor());
+  }
+
   // Font prewarm: scan pass accumulates text, then prewarm, then real render.
   // Without this, every cold codepoint cold-misses the 8-slot SD glyph
   // overflow ring and the page render serializes ~100+ individual SD reads.

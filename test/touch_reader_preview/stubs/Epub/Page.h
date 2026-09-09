@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "EpdFontFamily.h"
+#include "GfxRenderer.h"
 
 enum class CssTextAlign : uint8_t { Justify = 0, Left = 1, Center = 2, Right = 3, None = 4 };
 
@@ -35,6 +36,11 @@ class TextBlock {
   };
 
   explicit TextBlock(std::vector<Word> words, BlockStyle style = {}) : words(std::move(words)), style(style) {}
+
+  void render(GfxRenderer& renderer, int fontId, int x, int y, bool foregroundBlack) const {
+    for (const auto& word : words)
+      renderer.drawText(fontId, x + word.x, y, word.text.c_str(), foregroundBlack, word.style);
+  }
 
   uint16_t wordCount() const { return static_cast<uint16_t>(words.size()); }
   const char* wordText(uint16_t index) const { return words[index].text.c_str(); }

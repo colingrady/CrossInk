@@ -15,8 +15,11 @@ class TouchReaderPreviewModel {
   static constexpr size_t WORD_CAPACITY = 256;
   static constexpr size_t LINE_CAPACITY = 128;
 
-  bool capture(const Page& page, const GfxRenderer& renderer, const int fontId, const uint8_t lineHeightPercent) {
+  bool capture(const Page& page, const GfxRenderer& renderer, const int fontId, const uint8_t lineHeightPercent,
+               const int xOffset = 0, const int yOffset = 0) {
     clear();
+    sourceXOffset = xOffset;
+    sourceYOffset = yOffset;
     sourceLineHeightPixels =
         static_cast<int16_t>(std::max(1, (renderer.getLineHeight(fontId) * lineHeightPercent + 50) / 100));
     bool previousElementWasLine = false;
@@ -38,7 +41,9 @@ class TouchReaderPreviewModel {
       }
 
       Line& line = lines[lineCount++];
+      line.x = pageLine.xPos;
       line.y = pageLine.yPos;
+      line.sourceBlock = block;
       line.firstWord = wordCount;
       line.wordCount = block->wordCount();
       line.style = block->getBlockStyle();
@@ -125,6 +130,16 @@ class TouchReaderPreviewModel {
     }
   }
 
+  // Keep the source blocks alive so unchanged settings use the reader's exact
+  // rendering, including justification, ruby, bidi, and bionic run positions.
+  void renderSource(GfxRenderer& renderer, const int fontId, const bool foregroundBlack) const {
+    if (!valid()) return;
+    for (size_t i = 0; i < lineCount; ++i) {
+      const auto& line = lines[i];
+      line.sourceBlock->render(renderer, fontId, sourceXOffset + line.x, sourceYOffset + line.y, foregroundBlack);
+    }
+  }
+
   bool valid() const { return hasBaseline && lineCount > 0 && wordCount > 0; }
 
  private:
@@ -137,6 +152,8 @@ class TouchReaderPreviewModel {
   };
 
   struct Line {
+    std::shared_ptr<TextBlock> sourceBlock;
+    int16_t x = 0;
     int16_t y = 0;
     uint16_t firstWord = 0;
     uint16_t wordCount = 0;
@@ -150,6 +167,8 @@ class TouchReaderPreviewModel {
   uint16_t textSize = 0;
   uint16_t wordCount = 0;
   uint16_t lineCount = 0;
+  int sourceXOffset = 0;
+  int sourceYOffset = 0;
   int16_t firstLineY = 0;
   int16_t sourceLineHeightPixels = 1;
   bool hasBaseline = false;
@@ -342,6 +361,7 @@ class TouchReaderPreviewModel {
   }
 
   void clear() {
+    for (size_t i = 0; i < lineCount; ++i) lines[i].sourceBlock.reset();
     textSize = 0;
     wordCount = 0;
     lineCount = 0;

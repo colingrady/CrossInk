@@ -99,6 +99,8 @@ class HalDisplay {
   // straight to the controller; supportsStripGrayscale() gates the path. See
   // EInkDisplay::writeGrayscalePlaneStrip.
   void writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, uint16_t yStart, uint16_t numRows);
+  // Firmware policy for the reader's extra white-image refresh.
+  bool shouldSkipImageBlanking() const;
   bool supportsStripGrayscale() const;
 
   // Runtime geometry passthrough

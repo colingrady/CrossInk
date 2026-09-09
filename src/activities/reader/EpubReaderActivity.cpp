@@ -32,6 +32,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "DictionaryWordSelectActivity.h"
+#include "EpubGrayscale.h"
 #include "EpubReaderBookmarkListActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderClippingListActivity.h"
@@ -791,125 +792,6 @@ uint16_t resolveClippingJumpPage(Section& section, const Clipping& clipping, con
     findClippingPageNear(section, clippingText, resolvedPage, SEARCH_RADIUS, resolvedPage, expectedTableColumn);
   }
   return resolvedPage;
-}
-
-constexpr int GRAYSCALE_STRIP_ROWS = 80;
-
-bool runTiledGrayscalePass(GfxRenderer& renderer, const Page& page, const int fontId, const int marginLeft,
-                           const int marginTop, const bool foregroundBlack, const bool needsTextGrayscale,
-                           const bool needsImageGrayscale, uint8_t* scratch, const size_t scratchSize,
-                           const bool asyncRefreshPending) {
-  if ((!needsTextGrayscale && !needsImageGrayscale) || !renderer.supportsStripGrayscale()) {
-    return false;
-  }
-
-  const int displayHeight = renderer.getDisplayHeight();
-  const int displayWidthBytes = renderer.getDisplayWidthBytes();
-  const size_t planeBytes = static_cast<size_t>(displayWidthBytes) * displayHeight;
-
-  const auto renderPlaneToBuffer = [&](const GfxRenderer::RenderMode mode, uint8_t* buffer) {
-    renderer.setRenderMode(mode);
-    for (int y = 0; y < displayHeight; y += GRAYSCALE_STRIP_ROWS) {
-      const int rows = std::min(GRAYSCALE_STRIP_ROWS, displayHeight - y);
-      renderer.beginStripTarget(buffer + static_cast<size_t>(y) * displayWidthBytes, y, rows);
-      renderer.clearScreen(0x00);
-      if (needsTextGrayscale) {
-        page.render(renderer, fontId, marginLeft, marginTop, foregroundBlack);
-      } else {
-        page.renderImages(renderer, fontId, marginLeft, marginTop);
-      }
-      renderer.endStripTarget();
-    }
-  };
-
-  // Whole-plane buffers are about 48 KB each, so they are unsuitable for the
-  // task stack or permanent activity storage. Each transient allocation must
-  // leave enough total and contiguous heap for the next render allocations.
-  constexpr size_t PLANE_BUFFER_FREE_HEAP_RESERVE = 60000;
-  constexpr size_t PLANE_BUFFER_MAX_ALLOC_RESERVE = 16 * 1024;
-  const bool usePsramPlanes = psramHeapAvailable();
-  const auto planeBufferFits = [planeBytes, usePsramPlanes] {
-    if (usePsramPlanes) {
-      constexpr size_t PSRAM_PLANE_RESERVE = 128 * 1024;
-      const auto psram = MemoryBudget::psramSnapshot();
-      return psram.freeHeap >= planeBytes + PSRAM_PLANE_RESERVE && psram.maxAllocHeap >= planeBytes;
-    }
-    return ESP.getFreeHeap() >= planeBytes + PLANE_BUFFER_FREE_HEAP_RESERVE &&
-           ESP.getMaxAllocHeap() >= planeBytes + PLANE_BUFFER_MAX_ALLOC_RESERVE;
-  };
-  const auto allocatePlane = [planeBytes, usePsramPlanes] {
-    return usePsramPlanes ? makePsramByteBufferNoThrow(planeBytes) : makeHeapByteBufferNoThrow(planeBytes);
-  };
-  auto lsbPlaneBuf = (asyncRefreshPending && planeBufferFits()) ? allocatePlane() : HeapByteBuffer{};
-  auto msbPlaneBuf = (lsbPlaneBuf && planeBufferFits()) ? allocatePlane() : HeapByteBuffer{};
-
-  if (lsbPlaneBuf) {
-    if (usePsramPlanes) {
-      LOG_INF("EPS", "Using PSRAM grayscale planes: bytes=%u count=%u", static_cast<unsigned>(planeBytes),
-              msbPlaneBuf ? 2U : 1U);
-    }
-    renderPlaneToBuffer(GfxRenderer::GRAYSCALE_LSB, lsbPlaneBuf.get());
-    if (msbPlaneBuf) {
-      renderPlaneToBuffer(GfxRenderer::GRAYSCALE_MSB, msbPlaneBuf.get());
-    }
-
-    renderer.waitRefreshComplete();
-    renderer.writeGrayscalePlaneStrip(true, lsbPlaneBuf.get(), 0, displayHeight);
-    if (msbPlaneBuf) {
-      renderer.writeGrayscalePlaneStrip(false, msbPlaneBuf.get(), 0, displayHeight);
-    } else {
-      renderPlaneToBuffer(GfxRenderer::GRAYSCALE_MSB, lsbPlaneBuf.get());
-      renderer.writeGrayscalePlaneStrip(false, lsbPlaneBuf.get(), 0, displayHeight);
-    }
-
-    renderer.setRenderMode(GfxRenderer::BW);
-    renderer.displayGrayBuffer();
-    renderer.cleanupGrayscaleWithFrameBuffer();
-    return true;
-  }
-
-  if (asyncRefreshPending) {
-    // Controller writes and the BW snapshot fallback both need the refresh to
-    // be complete when the whole-plane allocation cannot be satisfied.
-    renderer.waitRefreshComplete();
-  }
-
-  const size_t requiredScratchSize = static_cast<size_t>(displayWidthBytes) * GRAYSCALE_STRIP_ROWS;
-  if (!scratch || scratchSize < requiredScratchSize) {
-    if (asyncRefreshPending) {
-      // The shadow-free async update does not rebuild the controller's
-      // differential baseline. Re-sync it even when grayscale is skipped.
-      renderer.cleanupGrayscaleWithFrameBuffer();
-    }
-    return false;
-  }
-
-  // Keep the live BW framebuffer intact, stream grayscale planes by row-band,
-  // then re-sync the controller BW state from the framebuffer.
-  const auto renderPlane = [&](const GfxRenderer::RenderMode mode, const bool lsbPlane) {
-    renderer.setRenderMode(mode);
-    for (int y = 0; y < displayHeight; y += GRAYSCALE_STRIP_ROWS) {
-      const int rows = std::min(GRAYSCALE_STRIP_ROWS, displayHeight - y);
-      renderer.beginStripTarget(scratch, y, rows);
-      renderer.clearScreen(0x00);
-      if (needsTextGrayscale) {
-        page.render(renderer, fontId, marginLeft, marginTop, foregroundBlack);
-      } else {
-        page.renderImages(renderer, fontId, marginLeft, marginTop);
-      }
-      renderer.endStripTarget();
-      renderer.writeGrayscalePlaneStrip(lsbPlane, scratch, y, rows);
-    }
-  };
-
-  renderPlane(GfxRenderer::GRAYSCALE_LSB, true);
-
-  renderPlane(GfxRenderer::GRAYSCALE_MSB, false);
-
-  renderer.setRenderMode(GfxRenderer::BW);
-  renderer.displayGrayBuffer();
-  renderer.cleanupGrayscaleWithFrameBuffer();
-  return true;
 }
 
 ToastRect computeToastRect(const GfxRenderer& renderer, const char* msg) {
@@ -2178,13 +2060,22 @@ void EpubReaderActivity::onEnter() {
   // instead would leave reader mode and the bookmark/clipping stores unbalanced.
   captureGlobalReaderSettings();
   epub->setupCacheDir();
+  {
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    epub->ensureOptimizerImageIndex();
+  }
   loadBookReaderSettings();
   sdFontSystem.setSettingsPersistenceCallback(persistReaderSdFontSettingsForBook, this);
   ensureReaderSdFontLoaded(renderer);
   ImageBlock::clearSessionRenderFailures();
-  ImageBlock::setExtractor(epub.get(), [](void* context, const char* source, const char* destination) {
-    return static_cast<Epub*>(context)->extractItemToFile(source, destination);
-  });
+  ImageBlock::setExtractor(
+      epub.get(),
+      [](void* context, const char* source, const char* destination) {
+        return static_cast<Epub*>(context)->extractItemToFile(source, destination);
+      },
+      [](void* context, const char* source, const int width, const int height, const char* destination) {
+        return static_cast<Epub*>(context)->seedOptimizerImageCache(source, width, height, destination);
+      });
 
   // Configure screen orientation based on settings
   // NOTE: This affects layout math and must be applied before any render calls.
@@ -2308,8 +2199,8 @@ void EpubReaderActivity::onExit() {
   clearPendingManualPageTurns();
   mappedInput.setReaderTouchscreenOverride(false);
 
-  // The extraction callback holds the Epub as a raw context pointer.
-  ImageBlock::setExtractor(nullptr, nullptr);
+  // The image callbacks hold the Epub as a raw context pointer.
+  ImageBlock::setExtractor(nullptr, nullptr, nullptr);
   releaseGrayscaleStripScratch(true);
   ImageBlock::releaseSessionPixelCache();
 
@@ -2670,8 +2561,10 @@ void EpubReaderActivity::loop() {
   const auto touch = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
   if (touch.tapped &&
       ReaderUtils::isBottomStatusBarTap(renderer, touch.y, UITheme::getInstance().getStatusBarHeight())) {
-    statusBarVisible = !statusBarVisible;
-    requestUpdate();
+    if (SETTINGS.tapToHideStatusBar) {
+      statusBarVisible = !statusBarVisible;
+      requestUpdate();
+    }
     return;
   }
   // A popup selection suppresses the Confirm release that follows its press.
@@ -5683,7 +5576,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         if (renderer.hasFrameBuffer()) GUI.drawPopup(renderer, tr(STR_INDEXING));
       };
 
-      bool imagesWereSuppressed = false;
       bool layoutAbortedForLowMemory = false;
       bool fallbackBuildSucceeded = false;
       bool usedReadablePartialFallback = false;
@@ -5715,7 +5607,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
           }
         }
 
-        bool attemptImagesWereSuppressed = false;
         bool attemptLayoutAbortedForLowMemory = false;
         const SectionBuildOptions buildOptions{
             buildingFootnotePreview ? pendingFootnotePreviewAnchor.c_str() : nullptr,
@@ -5728,8 +5619,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
           showIndexingPopup();
           {
             GfxRenderer::FrameBufferLoan loan(renderer);
-            buildSucceeded = section->createSectionFile(spec, popupFn, &attemptImagesWereSuppressed,
-                                                        &attemptLayoutAbortedForLowMemory, buildOptions);
+            buildSucceeded =
+                section->createSectionFile(spec, popupFn, nullptr, &attemptLayoutAbortedForLowMemory, buildOptions);
           }
         } else {
           const int target = pendingPageJump.has_value() ? *pendingPageJump : (nextPageNumber < 0 ? 0 : nextPageNumber);
@@ -5791,7 +5682,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
                 LOG_DBG("ERS", "Incremental relayout reached prior watermark: pages=%u target=%d", section->pageCount,
                         cachedChapterPageWatermark);
               }
-              attemptImagesWereSuppressed = attemptImagesWereSuppressed || section->lastBuildImagesWereSuppressed();
               attemptLayoutAbortedForLowMemory =
                   attemptLayoutAbortedForLowMemory || section->lastBuildLayoutAbortedForLowMemory();
               const bool requestedPageAvailable = anchorJump ? anchorPageReady()
@@ -5809,14 +5699,12 @@ void EpubReaderActivity::render(RenderLock&& lock) {
               buildSucceeded =
                   buildCancelledForBack || (!buildFailed && (section->pageCount > 0 || section->isBuildComplete()));
             } else {
-              attemptImagesWereSuppressed = attemptImagesWereSuppressed || section->lastBuildImagesWereSuppressed();
               attemptLayoutAbortedForLowMemory =
                   attemptLayoutAbortedForLowMemory || section->lastBuildLayoutAbortedForLowMemory();
             }
             buildPopupPending = false;
           }
         }
-        imagesWereSuppressed = imagesWereSuppressed || attemptImagesWereSuppressed;
         layoutAbortedForLowMemory = attemptLayoutAbortedForLowMemory;
         if (buildSucceeded) {
           activeSectionFontId = fontId;
@@ -5956,13 +5844,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         }
       }
 
-      if (!buildingFootnotePreview && imagesWereSuppressed) {
-        snprintf(APP_STATE.pendingAlertTitle, sizeof(APP_STATE.pendingAlertTitle), "%s",
-                 tr(STR_LOW_MEMORY_IMAGES_TITLE));
-        snprintf(APP_STATE.pendingAlertBody, sizeof(APP_STATE.pendingAlertBody), "%s", tr(STR_LOW_MEMORY_IMAGES_BODY));
-        APP_STATE.pendingAlertGoHomeOnBack.store(false, std::memory_order_relaxed);
-        APP_STATE.hasPendingAlert.store(true, std::memory_order_release);
-      }
     } else {
       LOG_DBG("ERS", "Cache found, skipping build... (pages=%u, font=%d mode=%u free=%u, maxAlloc=%u)",
               section->pageCount, activeSectionFontId, static_cast<unsigned>(usedRenderMode), ESP.getFreeHeap(),
@@ -6656,7 +6537,8 @@ bool EpubReaderActivity::ensureGrayscaleStripScratch() {
     return false;
   }
 
-  const size_t requiredSize = static_cast<size_t>(renderer.getDisplayWidthBytes()) * GRAYSCALE_STRIP_ROWS;
+  const size_t requiredSize =
+      static_cast<size_t>(renderer.getDisplayWidthBytes()) * EpubGrayscale::GRAYSCALE_STRIP_ROWS;
   if (grayscaleStripScratch && grayscaleStripScratchSize >= requiredSize) {
     return true;
   }
@@ -6756,7 +6638,8 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
       }
     }
     if (touchReaderPreviewModel &&
-        !touchReaderPreviewModel->capture(*page, renderer, fontId, SETTINGS.lineHeightPercent)) {
+        !touchReaderPreviewModel->capture(*page, renderer, fontId, SETTINGS.lineHeightPercent, orientedMarginLeft,
+                                          orientedMarginTop)) {
       LOG_DBG("ERDM", "Skipping touch reader preview outside the 8 KiB/256-run snapshot budget");
     }
   }
@@ -6839,6 +6722,15 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     renderer.clearScreen(ReaderUtils::readerBackgroundColor());
   }
+  if (pageHasImages) {
+    // Show the new page's placeholders before ZIP extraction or sidecar
+    // materialization. The loan can overwrite the framebuffer, so rebuild
+    // the complete page after returning it; the panel keeps the preview.
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    page->prepareImageCaches();
+    loan.end();
+    renderer.clearScreen(ReaderUtils::readerBackgroundColor());
+  }
   composePageBuffer();
   renderStatusBar();
   if (pendingBookmarkFeedback) {
@@ -6875,27 +6767,28 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
     return true;
   }
   if (pageHasImages) {
-    // Double FAST_REFRESH with selective image blanking (pablohc's technique):
-    // HALF_REFRESH sets particles too firmly for the grayscale LUT to adjust.
-    // Instead, blank only the image area and do two fast refreshes.
-    // Step 1: Display page with image area blanked (text appears, image area white)
-    // Step 2: Re-render with images and display again (images appear clean)
+    // Keep the legacy blank/base sequence unless the controller can transition
+    // directly to the complete image base.
     int16_t imgX, imgY, imgW, imgH;
     if (page->getImageBoundingBox(imgX, imgY, imgW, imgH)) {
-      // Blank the image before any panel update so a pending clean pass does
-      // not briefly show the decoded image before the final grayscale pass.
-      renderer.fillRect(imgX + orientedMarginLeft, imgY + orientedMarginTop, imgW, imgH, false);
-      // Image pages intentionally bypass the regular refresh cadence. Preserve
-      // a pending clean base before their double-FAST grayscale pipeline.
+      const bool directImageBase = renderer.shouldSkipImageBlanking();
+      // UC8179's base waveform transitions directly from the displayed page.
+      // Keep blanking for other controllers and for a pending strong cleanup.
+      const bool blankImage = !directImageBase || cleanImageBasePending;
+      if (blankImage) {
+        renderer.fillRect(imgX + orientedMarginLeft, imgY + orientedMarginTop, imgW, imgH, false);
+      }
       if (cleanImageBasePending) {
         renderer.displayBuffer(pagesUntilFullRefresh < 0 ? manualScreenRefreshMode() : HalDisplay::HALF_REFRESH);
         cleanImageBasePending = false;
       }
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-
-      // Re-render page content to restore images into the blanked area
-      // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
-      composePageBuffer();
+      if (!directImageBase) {
+        renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+      }
+      if (blankImage) {
+        // Restore the composed image after legacy blanking or strong cleanup.
+        composePageBuffer();
+      }
       // The restored image frame becomes the base for the grayscale image
       // planes below. On X3, use the same grayscale-aware base waveform as
       // text-only grayscale turns; other panels keep the FAST fallback behavior.
@@ -6933,9 +6826,9 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
   if (needsAnyGrayscale) {
     ensureGrayscaleStripScratch();
   }
-  if (runTiledGrayscalePass(renderer, *page, fontId, orientedMarginLeft, orientedMarginTop, foregroundBlack,
-                            needsTextGrayscale, needsImageGrayscale, grayscaleStripScratch.get(),
-                            grayscaleStripScratchSize, overlapRefresh)) {
+  if (EpubGrayscale::runTiledGrayscalePass(renderer, *page, fontId, orientedMarginLeft, orientedMarginTop,
+                                           foregroundBlack, needsTextGrayscale, needsImageGrayscale,
+                                           grayscaleStripScratch.get(), grayscaleStripScratchSize, overlapRefresh)) {
     return true;
   }
 
@@ -7596,6 +7489,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
       LOG_DBG("SLP", "EPUB: failed to load %s", filePath.c_str());
       return false;
     }
+    epub->ensureOptimizerImageIndex();
   }
   ensureReaderSdFontLoaded(renderer);
 
@@ -7721,6 +7615,19 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
     return false;
   }
 
+  {
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    ImageBlock::setExtractor(
+        epub.get(),
+        [](void* context, const char* source, const char* destination) {
+          return static_cast<Epub*>(context)->extractItemToFile(source, destination, 256);
+        },
+        [](void* context, const char* source, int width, int height, const char* destination) {
+          return static_cast<Epub*>(context)->seedOptimizerImageCache(source, width, height, destination);
+        });
+    page->prepareImageCaches();
+    ImageBlock::setExtractor(nullptr, nullptr, nullptr);
+  }
   renderer.clearScreen(ReaderUtils::readerBackgroundColor());
   page->render(renderer, renderFontId, layout.marginLeft, layout.marginTop, ReaderUtils::readerForegroundBlack());
   drawPublisherPageMarkers(renderer, *page, layout.marginTop, renderer.getScreenHeight() - layout.marginBottom,
