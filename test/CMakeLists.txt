@@ -78,3 +78,5 @@ add_subdirectory(pxc_v2)
 add_subdirectory(memory_policy)
 
 add_subdirectory(epub_grayscale)
+
+add_subdirectory(ui_symbol_fallback)

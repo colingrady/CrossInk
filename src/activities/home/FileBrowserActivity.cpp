@@ -1285,6 +1285,9 @@ void FileBrowserActivity::buildListScreen(UiApp::ScreenType& screen) {
     names[i] = getFileName(entry);
     if (SETTINGS.hideFileExtension == 0) values[i] = getFileExtension(entry);
     const std::string fullPath = buildFullPath(basepath, entry);
+    if (isPinnedBootFavorite(fullPath)) {
+      values[i] = values[i].empty() ? "⏻" : "⏻ " + values[i];
+    }
     if ((entry.back() == '/' && isPreferredSleepFolder(fullPath)) || isPinnedSleepFavorite(fullPath)) {
       values[i] = values[i].empty() ? "*" : "* " + values[i];
     }

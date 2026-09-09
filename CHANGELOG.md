@@ -2,6 +2,8 @@
 
 ### Added
 
+- Selected boot images now show a power symbol in the File Browser, distinct from the sleep-screen asterisk.
+
 - Separate Next Page and Previous Page gesture settings, plus toggles for custom boot screens and tapping to hide the reader status bar.
 
 - Keyboard layouts can now be enabled in Settings and switched from the keyboard's language key.
