@@ -1589,9 +1589,13 @@ void setup() {
   }
 
   if (restoreQuickLockAfterWake) {
-    // Render the reconstructed route first, then draw the badge. The pending
-    // wake release stays swallowed by the main loop, so it cannot unlock the
-    // restored lock immediately.
+    // Finish queued navigation (including Reader -> EPUB/TXT/XTC) before
+    // locking: the locked main loop intentionally does not dispatch activities.
+    // Waiting for a render alone would paint the temporary Reader loader and
+    // strand its pending transition, losing the page and its orientation.
+    activityManager.loop();
+    // Paint the reconstructed route before saving the badge backdrop. The wake
+    // release remains swallowed, so it cannot immediately unlock the device.
     (void)activityManager.requestUpdateAndWait();
     buttonShortcutController.restoreQuickLock(millis(), quickLockResumeTrigger);
     notifyQuickLockChanged(true);

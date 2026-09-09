@@ -51,6 +51,8 @@
 
 ### Fixed
 
+- Waking after a Quick Lock timeout now restores the reading page and orientation before locking input again. (#689)
+
 - Landscape reader menus now clear the previous drawer when switching to a shorter pane, keeping only one drawer visible.
 
 - Opening the reader menu on button-only devices now keeps the clock and battery status visible unless each is set to Always hide.
