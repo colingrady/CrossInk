@@ -273,6 +273,8 @@ device model and build.
 - **Publisher Page Numbers**: Show page numbers supplied by the EPUB when the
   book includes them.
 
+  Note: This reserves 5px of left margin to your screen to provide space for the page numbers. This is only noticeable if your `Left/Right` margins are set to `5`. If the page has no publisher page number, your margins may appear uneven.
+
 - **Hyphenation**: Whether to hyphenate text in Reading Mode; options are "ON" or "OFF".
 
 - **Reading Orientation**: Set the screen orientation for reading EPUB files:
