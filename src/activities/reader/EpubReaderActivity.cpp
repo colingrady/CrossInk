@@ -3644,7 +3644,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                                  }
                                }
                                resumeReadingPaceTimer("delete_stats_return");
-                               if (returnToReaderMenu && mappedInput.hasTouchHardware())
+                               if (result.isCancelled && returnToReaderMenu && mappedInput.hasTouchHardware())
                                  openReaderMenu();
                                else
                                  requestUpdate();
@@ -3656,10 +3656,13 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResult(
           std::make_unique<ConfirmationActivity>(renderer, mappedInput, confirmationHeading(StrId::STR_DELETE_CACHE),
                                                  epub ? epub->getTitle() : std::string{}, false, true),
-          [this](const ActivityResult& result) {
+          [this, returnToReaderMenu](const ActivityResult& result) {
             if (result.isCancelled) {
               resumeReadingPaceTimer("delete_cache_cancel");
-              requestUpdate();
+              if (returnToReaderMenu && mappedInput.hasTouchHardware())
+                openReaderMenu();
+              else
+                requestUpdate();
               return;
             }
 
@@ -3960,7 +3963,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
               BOOKMARKS.clearAll();
             }
             resumeReadingPaceTimer(result.isCancelled ? "delete_bookmarks_cancel" : "delete_bookmarks_return");
-            if (returnToReaderMenu && mappedInput.hasTouchHardware())
+            if (result.isCancelled && returnToReaderMenu && mappedInput.hasTouchHardware())
               openReaderMenu();
             else
               requestUpdate();
