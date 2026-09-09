@@ -157,7 +157,7 @@ void BmpViewerActivity::onEnter() {
 
   // 1. Open the file
   if (Storage.openFileForRead("BMP", filePath, file)) {
-    Bitmap bitmap(file, true);
+    Bitmap bitmap(file, true, renderer.supportsAbsoluteGrayscale());
 
     // 2. Parse headers to get dimensions
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
@@ -192,16 +192,43 @@ void BmpViewerActivity::onEnter() {
 
       GUI.fillPopupProgress(renderer, popupRect, 50);
 
+      const auto drawFrame = [&]() {
+        if (!renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight)) return false;
+        GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+        return true;
+      };
       renderer.clearScreen();
-      // Assuming drawBitmap defaults to 0,0 crop if omitted, or pass explicitly: drawBitmap(bitmap, x, y, pageWidth,
-      // pageHeight, 0, 0)
-      renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, 0, 0);
-
-      // Draw UI hints on the base layer
-      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-      // Single pass for non-grayscale images
-
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+      bool success = drawFrame();
+      if (success && bitmap.hasGreyscale() && renderer.supportsAbsoluteGrayscale()) {
+        success = renderer.displayAbsoluteGrayscaleBase();
+        for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
+          if (!success) break;
+          success = bitmap.rewindToData() == BmpReaderError::Ok;
+          if (!success) break;
+          renderer.clearScreen();
+          renderer.setRenderMode(mode);
+          success = drawFrame();
+          if (!success) break;
+          if (mode == GfxRenderer::GRAYSCALE_LSB)
+            renderer.copyGrayscaleLsbBuffers();
+          else
+            renderer.copyGrayscaleMsbBuffers();
+        }
+        if (success) renderer.displayGrayBuffer();
+        renderer.setRenderMode(GfxRenderer::BW);
+        // Popups need the original B/W image, not the last gray selector plane.
+        if (success) {
+          renderer.clearScreen();
+          success = bitmap.rewindToData() == BmpReaderError::Ok && drawFrame();
+          if (success) renderer.cleanupGrayscaleWithFrameBuffer();
+        }
+      } else if (success) {
+        renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+      }
+      if (!success) {
+        LOG_ERR("BMP", "Failed to render complete BMP image");
+        drawImageError(renderer, mappedInput, tr(STR_FAILED_LOWER));
+      }
 
     } else {
       // Handle file parsing error

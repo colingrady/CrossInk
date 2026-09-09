@@ -88,7 +88,17 @@ void HalDisplay::waitRefreshComplete() { einkDisplay.waitRefreshComplete(); }
 
 bool HalDisplay::supportsAsyncRefresh() const { return einkDisplay.supportsAsyncRefresh(); }
 
-bool HalDisplay::supportsAsyncGrayscaleBase() const { return !gpio.deviceIsX3() && einkDisplay.supportsAsyncRefresh(); }
+HalDisplay::GrayscaleCapabilities HalDisplay::grayscaleCapabilities(GrayscaleMode mode) const {
+  return einkDisplay.grayscaleCapabilities(mode);
+}
+
+bool HalDisplay::supportsAsyncGrayscaleBase() const { return grayscaleCapabilities().asyncBase; }
+
+bool HalDisplay::displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback, bool turnOffScreen) {
+  HalSpiBus::Lock spiLock;
+  if (gpio.deviceIsX3() && fallback == HALF_REFRESH) einkDisplay.requestResync(1);
+  return einkDisplay.displayGrayscaleBase(mode, convertRefreshMode(fallback), turnOffScreen);
+}
 
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
