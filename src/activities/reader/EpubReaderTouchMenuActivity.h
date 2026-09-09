@@ -81,6 +81,7 @@ class EpubReaderTouchMenuActivity final : public Activity {
   bool settingsChanged = false;
   bool didChangeSettings = false;
   bool previewDirty = false;
+  int16_t previousDrawerTop = -1;
   bool previewHasAntiAliasing = false;
   bool draggingSlider = false;
   bool sliderTapPending = false;
@@ -178,6 +179,7 @@ class EpubReaderTouchMenuActivity final : public Activity {
   void toggleSetting(RowId row);
   void adjustActiveSlider(int delta);
   void setActiveSliderPermille(int16_t permille);
+  int16_t drawerHeight() const;
   bool renderPreview();
   void renderPreviewWithAntiAliasing();
   void renderPreviewContents(const ReaderSettingsDraft& previewSettings, int previewFontId);

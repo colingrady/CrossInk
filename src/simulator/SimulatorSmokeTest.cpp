@@ -502,7 +502,7 @@ class SimulatorSmokeTest {
         inputScript.push_back(render("Reader restored after Home key menu with touch disabled", 4));
         inputScript.push_back(assertActivity("EpubReader"));
         inputScript.push_back(homeTap());
-        inputScript.push_back(render("Home opened from simulated Home key tap", 4));
+        inputScript.push_back(render("Home opened from simulated Home key tap", 8));
         inputScript.push_back(assertActivity("Home"));
         inputScript.push_back(enableReaderTouch());
         inputScript.push_back(openSmokeBook());

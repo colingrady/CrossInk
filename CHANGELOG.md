@@ -51,6 +51,8 @@
 
 ### Fixed
 
+- Landscape reader menus now clear the previous drawer when switching to a shorter pane, keeping only one drawer visible.
+
 - Opening the reader menu on button-only devices now keeps the clock and battery status visible unless each is set to Always hide.
 - View Clippings now shows loading feedback while preparing the list, so the first tap visibly responds.
 - X4 Pro USB uploads no longer inject task-watchdog errors into the serial transfer response.

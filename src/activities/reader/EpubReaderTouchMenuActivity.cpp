@@ -618,11 +618,8 @@ void EpubReaderTouchMenuActivity::drawerScreen(UiApp::ScreenType& screen, void* 
   static_cast<EpubReaderTouchMenuActivity*>(user)->buildDrawer(screen);
 }
 
-void EpubReaderTouchMenuActivity::buildDrawer(UiApp::ScreenType& screen) {
+int16_t EpubReaderTouchMenuActivity::drawerHeight() const {
   fui::SheetProps sheet;
-  sheet.anchor = fui::SheetEdge::Bottom;
-  sheet.dismissAction = ACTION_DISMISS;
-  sheet.radius = 0;
   sheet.ruleWidth = DRAWER_RULE_WIDTH;
   const int16_t grabberBand = DrawerHandle::bandHeight(sheet);
   // Give root menus exactly four standard row slots in landscape. A percentage
@@ -633,10 +630,20 @@ void EpubReaderTouchMenuActivity::buildDrawer(UiApp::ScreenType& screen) {
   if (state.pane == ReaderDrawerPane::Root && isLandscapeOrientation(renderer.getOrientation())) {
     drawerHeight = static_cast<int16_t>(
         grabberBand + sheet.ruleWidth + tabBarHeight + DRAWER_LIST_TOP_PADDING +
-        readerDrawerListHeightForRows(LANDSCAPE_ROOT_ROWS, screen.theme().rowHeight, screen.theme().spaceSm));
+        readerDrawerListHeightForRows(LANDSCAPE_ROOT_ROWS, app.theme().rowHeight, app.theme().spaceSm));
     drawerHeight = std::min<int16_t>(drawerHeight, renderer.getScreenHeight());
   }
-  const fui::Rect sheetContent = screen.sheet(sheet, drawerHeight);
+  return drawerHeight;
+}
+
+void EpubReaderTouchMenuActivity::buildDrawer(UiApp::ScreenType& screen) {
+  fui::SheetProps sheet;
+  sheet.anchor = fui::SheetEdge::Bottom;
+  sheet.dismissAction = ACTION_DISMISS;
+  sheet.radius = 0;
+  sheet.ruleWidth = DRAWER_RULE_WIDTH;
+  const int16_t tabBarHeight = static_cast<int16_t>(TAB_BAR_HEIGHT + TAB_BAR_VERTICAL_PADDING * 2);
+  const fui::Rect sheetContent = screen.sheet(sheet, drawerHeight());
   drawerHandleRect = DrawerHandle::registerTap(screen.frame(), sheetContent, sheet, ACTION_DISMISS);
   // Give every tab row four pixels of white space above and below its icons.
   // The tab pill keeps its previous size so the selected background does not
@@ -1625,9 +1632,7 @@ bool EpubReaderTouchMenuActivity::saveBookDictionary(const std::string& path) {
 void EpubReaderTouchMenuActivity::renderPreviewContents(const ReaderSettingsDraft& previewSettings,
                                                         const int previewFontId) {
   const int previewTop = 0;
-  const fui::SheetProps sheet;
-  const int drawerHeight = readerDrawerHeight(renderer, state.pane) + DrawerHandle::bandHeight(sheet);
-  const int previewBottom = renderer.getScreenHeight() - drawerHeight;
+  const int previewBottom = renderer.getScreenHeight() - drawerHeight();
   const int previewHeight = std::max(0, previewBottom - previewTop);
   renderer.fillRect(0, previewTop, renderer.getScreenWidth(), previewHeight, ReaderUtils::readerDarkModeEnabled());
   renderPreviewText(previewSettings, previewFontId);
@@ -1645,10 +1650,12 @@ void EpubReaderTouchMenuActivity::renderPreviewText(const ReaderSettingsDraft& p
                                                     clockReservation + ReaderUtils::TOP_CLOCK_TEXT_PADDING);
   const int previewWidth =
       std::max(1, renderer.getScreenWidth() - static_cast<int>(previewSettings.screenMarginHorizontal) * 2);
+  renderer.beginTextClip(0, 0, renderer.getScreenWidth(), renderer.getScreenHeight() - drawerHeight());
   previewModel->renderText(renderer, previewFontId, previewSettings.screenMarginHorizontal, previewYOffset,
                            previewWidth, previewSettings.lineHeightPercent, previewSettings.wordSpacing,
                            previewSettings.paragraphAlignment, previewSettings.bionicReadingEnabled,
                            previewSettings.guideReadingEnabled, ReaderUtils::readerForegroundBlack());
+  renderer.endTextClip();
 }
 
 bool EpubReaderTouchMenuActivity::renderPreview() {
@@ -1769,6 +1776,15 @@ void EpubReaderTouchMenuActivity::loop() {
 }
 
 void EpubReaderTouchMenuActivity::render(RenderLock&&) {
+  const int16_t drawerTop = static_cast<int16_t>(renderer.getScreenHeight() - drawerHeight());
+  if (previousDrawerTop >= 0 && drawerTop > previousDrawerTop) {
+    // A shorter pane exposes pixels occupied by the old sheet. Clear them even
+    // when this page has no text preview (image pages or snapshot allocation failure).
+    renderer.fillRect(0, previousDrawerTop, renderer.getScreenWidth(), drawerTop - previousDrawerTop,
+                      ReaderUtils::readerDarkModeEnabled());
+    previewDirty = true;
+  }
+  previousDrawerTop = drawerTop;
   if (renderPreview()) {
     previewHasAntiAliasing = draft.textAntiAliasing && ReaderUtils::readerForegroundBlack();
   }
