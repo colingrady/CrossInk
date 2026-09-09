@@ -44,6 +44,7 @@
 ### Fixed
 
 - Opening the reader menu on button-only devices now keeps the clock and battery status visible unless each is set to Always hide.
+- View Clippings now shows loading feedback while preparing the list, so the first tap visibly responds.
 - X4 Pro USB uploads no longer inject task-watchdog errors into the serial transfer response.
 - Long-press Menu and Back shortcuts no longer pass their release into reader screens opened by the shortcut.
 - Mixed-direction EPUB paragraphs now retain their block reading direction when inline spans change direction.
@@ -68,7 +69,6 @@
 - S3 devices without a USB-detect pin can now recognize power-only chargers through battery charging state.
 - Power-latch pins now stay asserted during deep sleep on S3 devices, preventing battery-only wakes from becoming slow cold boots.
 - Sticky and X4 Pro readers now reject firmware files built for the other device before SD-card or over-the-air updates write the OTA partition.
-
 - USB Drive startup failures now restore SD-card access and return Home automatically after showing an error.
 - Minimal and Dashboard Home screens no longer highlight front-button hints when pressing the side Up or Down buttons.
 - Declining an alternate dictionary-form lookup now returns to the reader instead of leaving the selected word active.
