@@ -17,6 +17,7 @@
 #include "activities/ActivityManager.h"
 #include "activities/reader/EpubReaderMenuActivity.h"
 #include "activities/reader/ReaderOptionsActivity.h"
+#include "activities/reader/ReaderUtils.h"
 #include "activities/settings/QuickActionsActivity.h"
 #include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
@@ -120,6 +121,60 @@ class SimulatorSmokeTest {
     SETTINGS.uiTheme = static_cast<uint8_t>(theme);
     UITheme::getInstance().reload();
     LOG_INF("SMOKE", "Using theme index %d", theme);
+  }
+
+  static void verifyMixedPageGestures() {
+#if CROSSINK_APP_CAP_TOUCH
+    if (!gpio.hasTouch()) return;
+    const uint8_t savedNext = SETTINGS.pageTurnGesture;
+    const uint8_t savedPrevious = SETTINGS.previousPageGesture;
+    const int width = renderer.getScreenWidth();
+    const int y = renderer.getScreenHeight() / 2;
+    mappedInputManager.setReaderMode(true);
+    for (uint8_t next = 0; next < CrossPointSettings::PAGE_TURN_GESTURE_COUNT; ++next) {
+      for (uint8_t previous = 0; previous < CrossPointSettings::PAGE_TURN_GESTURE_COUNT; ++previous) {
+        SETTINGS.pageTurnGesture = next;
+        SETTINGS.previousPageGesture = previous;
+        const bool inverted = next == CrossPointSettings::INVERTED_TAP || previous == CrossPointSettings::INVERTED_TAP;
+        const bool nextTap = next == CrossPointSettings::TAP_AND_SWIPE || next == CrossPointSettings::TAP_ONLY ||
+                             next == CrossPointSettings::INVERTED_TAP;
+        const bool previousTap = previous == CrossPointSettings::TAP_AND_SWIPE ||
+                                 previous == CrossPointSettings::TAP_ONLY ||
+                                 previous == CrossPointSettings::INVERTED_TAP;
+        for (const int x : {0, width / 3 - 1, width / 3, width * 2 / 3 - 1, width * 2 / 3, width - 1}) {
+          mappedInputManager.simulatorInjectTouchDown(x, y);
+          mappedInputManager.simulatorInjectTouchRelease(x, y);
+          const auto result = ReaderUtils::detectTouchPageTurn(renderer, mappedInputManager);
+          const bool nextZone = inverted ? x < width * 2 / 3 : x >= width / 3;
+          const bool expectedNext = nextTap && (!previousTap || nextZone);
+          const bool expectedPrevious = previousTap && (!nextTap || !nextZone);
+          if (!result.tapped || result.next != expectedNext || result.prev != expectedPrevious) {
+            fail("Mixed page tap mismatch: next=%u previous=%u x=%d", next, previous, x);
+          }
+          mappedInputManager.simulatorClearInputFrame();
+        }
+        for (const bool right : {false, true}) {
+          const int startX = right ? 1 : width - 2;
+          const int endX = right ? width - 2 : 1;
+          mappedInputManager.simulatorInjectTouchDown(startX, y);
+          mappedInputManager.simulatorInjectTouchMove(endX, y);
+          mappedInputManager.simulatorInjectTouchRelease(endX, y);
+          const auto result = ReaderUtils::detectTouchPageTurn(renderer, mappedInputManager);
+          const uint8_t mode = right ? previous : next;
+          const bool expected = (mode == CrossPointSettings::TAP_AND_SWIPE || mode == CrossPointSettings::SWIPE_ONLY);
+          if (result.next != (!right && expected) || result.prev != (right && expected) ||
+              (right && !expected && mappedInputManager.wasReleased(MappedInputManager::Button::Back))) {
+            fail("Mixed page swipe mismatch: next=%u previous=%u right=%d", next, previous, right);
+          }
+          mappedInputManager.simulatorClearInputFrame();
+        }
+      }
+    }
+    SETTINGS.pageTurnGesture = savedNext;
+    SETTINGS.previousPageGesture = savedPrevious;
+    mappedInputManager.setReaderMode(false);
+    LOG_INF("SMOKE", "All 25 mixed page gesture combinations passed");
+#endif
   }
 
   static void verifyReaderControlsSettings() {
@@ -236,6 +291,7 @@ class SimulatorSmokeTest {
         }
         verifyUpDownShortcutAvailability();
         verifyReaderControlsSettings();
+        verifyMixedPageGestures();
         applyRequestedTheme();
         activityManager.goHome();
         queueStep("Home", SmokeStep::Home);

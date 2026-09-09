@@ -51,6 +51,8 @@
 
 ### Fixed
 
+- Mixed page gestures now give the full page tap area to the only tap-enabled direction; Inverted Tap swaps shared tap zones without disabling the other direction’s swipe setting.
+
 - Waking after a Quick Lock timeout now restores the reading page and orientation before locking input again. (#689)
 
 - Landscape reader menus now clear the previous drawer when switching to a shorter pane, keeping only one drawer visible.

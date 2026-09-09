@@ -159,13 +159,15 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     return result;
   }
 
-  // Each direction owns its tap mode. Next wins if independent inverted
-  // settings overlap, so one gesture can never request two page turns.
-  result.next = allowsTap(SETTINGS.pageTurnGesture) &&
-                (SETTINGS.pageTurnGesture == CrossPointSettings::INVERTED_TAP ? x < (width * 2) / 3 : x >= width / 3);
-  result.prev =
-      !result.next && allowsTap(SETTINGS.previousPageGesture) &&
-      (SETTINGS.previousPageGesture == CrossPointSettings::INVERTED_TAP ? x >= (width * 2) / 3 : x < width / 3);
+  // Give the entire page tap area to the sole tap-enabled direction. When
+  // both accept taps, either Inverted Tap setting swaps their shared zones.
+  const bool nextTaps = allowsTap(SETTINGS.pageTurnGesture);
+  const bool previousTaps = allowsTap(SETTINGS.previousPageGesture);
+  const bool invertedTaps = SETTINGS.pageTurnGesture == CrossPointSettings::INVERTED_TAP ||
+                            SETTINGS.previousPageGesture == CrossPointSettings::INVERTED_TAP;
+  const bool nextZone = invertedTaps ? x < (width * 2) / 3 : x >= width / 3;
+  result.next = nextTaps && (!previousTaps || nextZone);
+  result.prev = previousTaps && (!nextTaps || !nextZone);
   return result;
 #endif
 }
