@@ -7,12 +7,10 @@ STR_SET_AS_BOOT_SCREEN: "Екран завантаження"
 STR_CLEAR_BOOT_SCREEN: "Очистити екран"
 STR_DICTIONARY: "Словник"
 STR_NOT_FOUND: "Не знайдено"
-
 STR_TAP_AND_SWIPE: "Торкання і свайп"
 STR_TAP_ONLY: "Лише торкання"
 STR_SWIPE_ONLY: "Лише свайп"
 STR_INVERTED_TAP: "Інверсне торкання"
-
 STR_CROSSINK: "CrossInk"
 STR_BOOTING: "ЗАВАНТАЖЕННЯ"
 STR_SLEEPING: "СПИТЬ"
@@ -489,7 +487,6 @@ STR_NEARBY_STATS_SCANNING: "Пошук читалки для обміну ста
 STR_NEARBY_STATS_SYNCING: "Надсилання й отримання статистики"
 STR_NEARBY_STATS_SYNCED: "Обидві читалки синхронізовано"
 STR_NEARBY_STATS_SIMULATOR_UNAVAILABLE: "Синхронізація статистики поруч недоступна в симуляторі"
-
 STR_BITTER: "Bitter"
 STR_CHANGE_FONT: "Змінити шрифт"
 STR_CHANGE_FONT_SIZE: "Змінити розмір шрифту"
@@ -544,7 +541,6 @@ STR_TINY: "Крихітний"
 STR_TOGGLE_BIONIC_READING: "Біонічне читання"
 STR_TOGGLE_BOOKMARK: "Перемкнути закладку"
 STR_TOGGLE_GUIDE_DOTS: "Керівні точки"
-
 STR_NEARBY_STATS_VERSION_MISMATCH: "Невідповідність версій. Статистику не синхронізовано"
 STR_PWR_BTN_FOOTNOTE_BACK: "Назад із виносок"
 STR_DELETE_BOOKMARKS: "Очистити список закладок"
@@ -581,6 +577,5 @@ STR_SHORT_PRESS_POWER: "Коротке натискання кнопки жив�
 STR_LONG_PRESS_POWER: "Довге натискання кнопки живлення"
 STR_LONG_PRESS_BACK: "Довге натискання кнопки Назад"
 STR_LONG_PRESS_MENU_SHORTCUT: "Довге натискання меню"
-
 STR_CUSTOM_BOOTSCREEN: "Власний екран запуску"
 STR_TAP_HIDE_STATUS_BAR: "Дотик ховає рядок стану"

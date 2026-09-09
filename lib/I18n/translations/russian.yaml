@@ -7,12 +7,10 @@ STR_SET_AS_BOOT_SCREEN: "Экран загрузки"
 STR_CLEAR_BOOT_SCREEN: "Очистить экран"
 STR_DICTIONARY: "Словарь"
 STR_NOT_FOUND: "Не найдено"
-
 STR_TAP_AND_SWIPE: "Нажатие и свайп"
 STR_TAP_ONLY: "Только нажатие"
 STR_SWIPE_ONLY: "Только свайп"
 STR_INVERTED_TAP: "Обратное нажатие"
-
 STR_CROSSINK: "CrossInk"
 STR_BOOTING: "Загрузка"
 STR_SLEEPING: "Спящий режим"
@@ -545,7 +543,6 @@ STR_TINY: "Крошечный"
 STR_TOGGLE_BIONIC_READING: "Бионическое чтение"
 STR_TOGGLE_BOOKMARK: "Переключить закладку"
 STR_TOGGLE_GUIDE_DOTS: "Направляющие точки"
-
 STR_NEARBY_STATS_VERSION_MISMATCH: "Несовпадение версий. Статистика не синхронизирована"
 STR_STATS_TOTAL_READING_TIME_LBL: "Общее время чтения"
 STR_STATS_THIS_DEVICE_SCREEN: "Это устр."
@@ -594,6 +591,5 @@ STR_SHORT_PRESS_POWER: "Короткое нажатие кнопки питан�
 STR_LONG_PRESS_POWER: "Долгое нажатие кнопки питания"
 STR_LONG_PRESS_BACK: "Долгое нажатие кнопки Назад"
 STR_LONG_PRESS_MENU_SHORTCUT: "Долгое нажатие меню"
-
 STR_CUSTOM_BOOTSCREEN: "Свой экран запуска"
 STR_TAP_HIDE_STATUS_BAR: "Касание скрывает строку состояния"
