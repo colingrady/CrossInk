@@ -1884,6 +1884,12 @@ void EpubReaderActivity::restoreGlobalReaderSettings() {
   if (!restoreGlobalReaderSettingsOnExit) {
     return;
   }
+  // Home/sleep can discard the stack without the Settings result callback.
+  // SETTINGS already contains the edited globals while the book is suspended.
+  if (bookReaderSettingsSuspendedForGlobalEdit) {
+    captureReaderSettings(globalReaderSettingsBeforeBook);
+    bookReaderSettingsSuspendedForGlobalEdit = false;
+  }
   applyReaderSettings(globalReaderSettingsBeforeBook);
   restoreGlobalReaderSettingsOnExit = false;
 }
@@ -1976,7 +1982,7 @@ void EpubReaderActivity::persistReaderSdFontSettings() {
 }
 
 bool EpubReaderActivity::saveGlobalSettingsPreservingBookOverrides() {
-  if (!restoreGlobalReaderSettingsOnExit) {
+  if (!restoreGlobalReaderSettingsOnExit || bookReaderSettingsSuspendedForGlobalEdit) {
     return SETTINGS.saveToFile();
   }
 
@@ -1988,13 +1994,14 @@ bool EpubReaderActivity::saveGlobalSettingsPreservingBookOverrides() {
   return saved;
 }
 
-void EpubReaderActivity::beginGlobalSettingsEdit() {
+bool EpubReaderActivity::beginGlobalSettingsEdit() {
   if (bookReaderSettingsSuspendedForGlobalEdit || !restoreGlobalReaderSettingsOnExit) {
-    return;
+    return false;
   }
   captureReaderSettings(suspendedBookReaderSettings);
   applyReaderSettings(globalReaderSettingsBeforeBook);
   bookReaderSettingsSuspendedForGlobalEdit = true;
+  return true;
 }
 
 void EpubReaderActivity::endGlobalSettingsEdit() {

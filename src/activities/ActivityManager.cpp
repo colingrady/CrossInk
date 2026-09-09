@@ -867,24 +867,32 @@ bool ActivityManager::handleShortcutAction(const CrossPointSettings::SHORT_PWRBT
          currentActivity->handleShortcutAction(action);
 }
 
+Activity* ActivityManager::findEpubReader() const {
+  if (currentActivity && currentActivity->isEpubReaderActivity()) return currentActivity.get();
+  const auto reader = std::find_if(stackActivities.rbegin(), stackActivities.rend(),
+                                   [](const auto& activity) { return activity && activity->isEpubReaderActivity(); });
+  return reader != stackActivities.rend() ? reader->get() : nullptr;
+}
+
 void ActivityManager::persistGlobalSettings() {
   // A modal may be current while its EPUB reader, which owns the per-book
   // override, remains on the stack. Let that reader protect the global write.
-  if (currentActivity && currentActivity->isEpubReaderActivity()) {
-    currentActivity->persistGlobalSettings();
-    return;
-  }
-  const auto reader = std::find_if(stackActivities.rbegin(), stackActivities.rend(),
-                                   [](const auto& activity) { return activity && activity->isEpubReaderActivity(); });
-  if (reader != stackActivities.rend()) {
-    (*reader)->persistGlobalSettings();
-    return;
-  }
-  if (currentActivity) {
+  if (auto* reader = findEpubReader()) {
+    reader->persistGlobalSettings();
+  } else if (currentActivity) {
     currentActivity->persistGlobalSettings();
   } else {
     SETTINGS.saveToFile();
   }
+}
+
+bool ActivityManager::beginGlobalSettingsEdit() {
+  auto* reader = findEpubReader();
+  return reader && reader->onFrontlightGlobalSettingsOpened();
+}
+
+void ActivityManager::endGlobalSettingsEdit() {
+  if (auto* reader = findEpubReader()) reader->onFrontlightGlobalSettingsClosed();
 }
 
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }
