@@ -579,3 +579,6 @@ STR_SHORT_PRESS_POWER: "Коротке натискання кнопки жив�
 STR_LONG_PRESS_POWER: "Довге натискання кнопки живлення"
 STR_LONG_PRESS_BACK: "Довге натискання кнопки Назад"
 STR_LONG_PRESS_MENU_SHORTCUT: "Довге натискання меню"
+
+STR_CUSTOM_BOOTSCREEN: "Власний екран запуску"
+STR_TAP_HIDE_STATUS_BAR: "Дотик ховає рядок стану"

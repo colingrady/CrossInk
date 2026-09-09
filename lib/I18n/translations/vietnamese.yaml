@@ -581,3 +581,6 @@ STR_SHORT_PRESS_POWER: "Nhấn nhanh nút nguồn"
 STR_LONG_PRESS_POWER: "Nhấn giữ nút nguồn"
 STR_LONG_PRESS_BACK: "Nhấn giữ nút Quay lại"
 STR_LONG_PRESS_MENU_SHORTCUT: "Nhấn giữ menu"
+
+STR_CUSTOM_BOOTSCREEN: "Màn hình khởi động riêng"
+STR_TAP_HIDE_STATUS_BAR: "Chạm để ẩn thanh trạng thái"

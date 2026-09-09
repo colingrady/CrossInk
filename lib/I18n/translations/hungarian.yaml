@@ -525,3 +525,7 @@ STR_SHORT_PRESS_POWER: "A bekapcsológomb rövid megnyomása"
 STR_LONG_PRESS_POWER: "A bekapcsológomb hosszú megnyomása"
 STR_LONG_PRESS_BACK: "A Vissza gomb hosszú megnyomása"
 STR_LONG_PRESS_MENU_SHORTCUT: "A menü hosszú megnyomása"
+
+STR_CUSTOM_BOOTSCREEN: "Egyéni indítóképernyő"
+STR_TAP_HIDE_STATUS_BAR: "Állapotsáv elrejtése koppintással"
+STR_PREV_PAGE: "Előző oldal"

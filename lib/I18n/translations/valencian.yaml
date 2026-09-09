@@ -567,3 +567,6 @@ STR_SHORT_PRESS_POWER: "Clic curt del botó d'engegada"
 STR_LONG_PRESS_POWER: "Clic llarg del botó d'engegada"
 STR_LONG_PRESS_BACK: "Clic llarg del botó Enrere"
 STR_LONG_PRESS_MENU_SHORTCUT: "Clic llarg del menú"
+
+STR_CUSTOM_BOOTSCREEN: "Pantalla d’inici pròpia"
+STR_TAP_HIDE_STATUS_BAR: "Toca per a amagar l’estat"

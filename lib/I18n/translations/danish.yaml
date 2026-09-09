@@ -525,3 +525,7 @@ STR_SHORT_PRESS_POWER: "Kort tryk på tænd/sluk-knappen"
 STR_LONG_PRESS_POWER: "Langt tryk på tænd/sluk-knappen"
 STR_LONG_PRESS_BACK: "Langt tryk på Tilbage"
 STR_LONG_PRESS_MENU_SHORTCUT: "Langt tryk på menuen"
+
+STR_CUSTOM_BOOTSCREEN: "Egen startskærm"
+STR_TAP_HIDE_STATUS_BAR: "Tryk skjuler statuslinje"
+STR_PREV_PAGE: "Forrige side"

@@ -585,6 +585,12 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     this->*(info.valuePtr) = value;
   }
 
+  // The old gesture setting controlled both directions. Preserve it on upgrade.
+  if (doc["previousPageGesture"].isNull()) {
+    previousPageGesture = pageTurnGesture;
+    needsResave = true;
+  }
+
   // Older global settings files named the display preference readerDarkMode.
   // Preserve it when moving to the global screenInverted setting.
   if (doc["screenInverted"].isNull() && !doc["readerDarkMode"].isNull()) {

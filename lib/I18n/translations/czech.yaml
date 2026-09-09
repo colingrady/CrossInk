@@ -713,3 +713,6 @@ STR_SHORT_PRESS_POWER: "Krátké stisknutí tlačítka napájení"
 STR_LONG_PRESS_POWER: "Dlouhé stisknutí tlačítka napájení"
 STR_LONG_PRESS_BACK: "Dlouhé stisknutí tlačítka Zpět"
 STR_LONG_PRESS_MENU_SHORTCUT: "Dlouhé stisknutí nabídky"
+
+STR_CUSTOM_BOOTSCREEN: "Vlastní úvodní obrazovka"
+STR_TAP_HIDE_STATUS_BAR: "Klepnutím skrýt stavový řádek"

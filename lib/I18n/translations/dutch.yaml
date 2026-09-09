@@ -524,3 +524,7 @@ STR_SHORT_PRESS_POWER: "Kort indrukken van de aan/uit-knop"
 STR_LONG_PRESS_POWER: "Lang indrukken van de aan/uit-knop"
 STR_LONG_PRESS_BACK: "Lang indrukken van Terug"
 STR_LONG_PRESS_MENU_SHORTCUT: "Lang indrukken van het menu"
+
+STR_CUSTOM_BOOTSCREEN: "Eigen opstartscherm"
+STR_TAP_HIDE_STATUS_BAR: "Tik om statusbalk te verbergen"
+STR_PREV_PAGE: "Vorige pagina"

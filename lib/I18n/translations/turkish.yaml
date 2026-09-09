@@ -524,3 +524,7 @@ STR_SHORT_PRESS_POWER: "Güç düğmesine kısa basma"
 STR_LONG_PRESS_POWER: "Güç düğmesine uzun basma"
 STR_LONG_PRESS_BACK: "Geri düğmesine uzun basma"
 STR_LONG_PRESS_MENU_SHORTCUT: "Menüye uzun basma"
+
+STR_CUSTOM_BOOTSCREEN: "Özel açılış ekranı"
+STR_TAP_HIDE_STATUS_BAR: "Dokunarak durum çubuğunu gizle"
+STR_PREV_PAGE: "Önceki sayfa"

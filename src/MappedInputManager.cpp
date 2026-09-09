@@ -584,9 +584,9 @@ MappedInputManager::SwipeDir MappedInputManager::wasSwipe() const {
 
 bool MappedInputManager::wasBackGesture() const {
   if (!touchInputEnabled()) return false;
-  // Tap-only page-turn mode must not let a right swipe from the left edge
-  // become the reader's Back/Home action.
-  if (readerMode && SETTINGS.pageTurnGesture == CrossPointSettings::TAP_ONLY) {
+  // A disabled previous-page swipe must not fall through to Back/Home.
+  if (readerMode && SETTINGS.previousPageGesture != CrossPointSettings::TAP_AND_SWIPE &&
+      SETTINGS.previousPageGesture != CrossPointSettings::SWIPE_ONLY) {
     return false;
   }
   // Back = left-to-right swipe starting near the left edge. Edge-anchored so that

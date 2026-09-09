@@ -702,3 +702,6 @@ STR_SHORT_PRESS_POWER: "Kurzer Druck auf die Ein-/Aus-Taste"
 STR_LONG_PRESS_POWER: "Langer Druck auf die Ein-/Aus-Taste"
 STR_LONG_PRESS_BACK: "Langer Druck auf Zurück"
 STR_LONG_PRESS_MENU_SHORTCUT: "Langer Druck auf Menü"
+
+STR_CUSTOM_BOOTSCREEN: "Eigenes Startbild"
+STR_TAP_HIDE_STATUS_BAR: "Tippen blendet Statusleiste aus"

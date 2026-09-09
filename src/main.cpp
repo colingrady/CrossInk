@@ -1405,7 +1405,7 @@ void setup() {
   // Without either, retain the fast splashless resume path.
   bool hasBootScreenDirectory = false;
   bool hasPinnedBootScreen = false;
-  if (isSleepWake && !APP_STATE.showBootScreen) {
+  if (SETTINGS.customBootscreenEnabled && isSleepWake && !APP_STATE.showBootScreen) {
     std::string bootScreenDirectory;
     hasBootScreenDirectory = ImageFolderIndex::resolveBootScreenDirectory(bootScreenDirectory);
     hasPinnedBootScreen = !APP_STATE.favoriteBootImagePath.empty() &&

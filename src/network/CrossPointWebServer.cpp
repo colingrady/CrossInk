@@ -75,7 +75,9 @@ uint8_t enumRawValueForDisplayIndex(const SettingInfo& setting, uint8_t displayI
 }
 
 bool isWebSettingAvailable(const SettingInfo& setting) {
-  if (setting.nameId == StrId::STR_PAGE_TURN && !gpio.hasTouch()) {
+  if ((setting.nameId == StrId::STR_NEXT_PAGE || setting.nameId == StrId::STR_PREV_PAGE ||
+       setting.nameId == StrId::STR_TAP_HIDE_STATUS_BAR) &&
+      !gpio.hasTouch()) {
     return false;
   }
 

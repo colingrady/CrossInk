@@ -525,3 +525,7 @@ STR_SHORT_PRESS_POWER: "Қуат түймесін қысқа басу"
 STR_LONG_PRESS_POWER: "Қуат түймесін ұзақ басу"
 STR_LONG_PRESS_BACK: "Артқа түймесін ұзақ басу"
 STR_LONG_PRESS_MENU_SHORTCUT: "Мәзірді ұзақ басу"
+
+STR_CUSTOM_BOOTSCREEN: "Жеке іске қосу экраны"
+STR_TAP_HIDE_STATUS_BAR: "Түртіп күй жолағын жасыру"
+STR_PREV_PAGE: "Алдыңғы бет"

@@ -513,3 +513,7 @@ STR_SHORT_PRESS_POWER: "Virtapainikkeen lyhyt painallus"
 STR_LONG_PRESS_POWER: "Virtapainikkeen pitkä painallus"
 STR_LONG_PRESS_BACK: "Takaisin-painikkeen pitkä painallus"
 STR_LONG_PRESS_MENU_SHORTCUT: "Valikon pitkä painallus"
+
+STR_CUSTOM_BOOTSCREEN: "Oma käynnistyskuva"
+STR_TAP_HIDE_STATUS_BAR: "Piilota tilapalkki napauttamalla"
+STR_PREV_PAGE: "Edellinen sivu"

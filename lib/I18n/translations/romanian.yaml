@@ -524,3 +524,7 @@ STR_SHORT_PRESS_POWER: "Apăsare scurtă a butonului de alimentare"
 STR_LONG_PRESS_POWER: "Apăsare lungă a butonului de alimentare"
 STR_LONG_PRESS_BACK: "Apăsare lungă a butonului Înapoi"
 STR_LONG_PRESS_MENU_SHORTCUT: "Apăsare lungă a meniului"
+
+STR_CUSTOM_BOOTSCREEN: "Ecran de pornire propriu"
+STR_TAP_HIDE_STATUS_BAR: "Atinge pentru a ascunde starea"
+STR_PREV_PAGE: "Pagina anterioară"

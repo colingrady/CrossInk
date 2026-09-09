@@ -525,3 +525,7 @@ STR_SHORT_PRESS_POWER: "Кароткае націсканне кнопкі сі�
 STR_LONG_PRESS_POWER: "Доўгае націсканне кнопкі сілкавання"
 STR_LONG_PRESS_BACK: "Доўгае націсканне кнопкі назад"
 STR_LONG_PRESS_MENU_SHORTCUT: "Доўгае націсканне меню"
+
+STR_CUSTOM_BOOTSCREEN: "Свой экран запуску"
+STR_TAP_HIDE_STATUS_BAR: "Націск хавае радок стану"
+STR_PREV_PAGE: "Папярэдняя старонка"

@@ -1,7 +1,5 @@
 #include "EpubReaderActivity.h"
 
-#include "EpubGrayscale.h"
-
 #include <Arduino.h>
 #include <Epub/Page.h>
 #include <Epub/PageCountEstimator.h>
@@ -34,6 +32,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "DictionaryWordSelectActivity.h"
+#include "EpubGrayscale.h"
 #include "EpubReaderBookmarkListActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderClippingListActivity.h"
@@ -794,7 +793,6 @@ uint16_t resolveClippingJumpPage(Section& section, const Clipping& clipping, con
   }
   return resolvedPage;
 }
-
 
 ToastRect computeToastRect(const GfxRenderer& renderer, const char* msg) {
   constexpr int toastPadX = 20;
@@ -2563,8 +2561,10 @@ void EpubReaderActivity::loop() {
   const auto touch = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
   if (touch.tapped &&
       ReaderUtils::isBottomStatusBarTap(renderer, touch.y, UITheme::getInstance().getStatusBarHeight())) {
-    statusBarVisible = !statusBarVisible;
-    requestUpdate();
+    if (SETTINGS.tapToHideStatusBar) {
+      statusBarVisible = !statusBarVisible;
+      requestUpdate();
+    }
     return;
   }
   // A popup selection suppresses the Confirm release that follows its press.
@@ -6549,7 +6549,8 @@ bool EpubReaderActivity::ensureGrayscaleStripScratch() {
     return false;
   }
 
-  const size_t requiredSize = static_cast<size_t>(renderer.getDisplayWidthBytes()) * EpubGrayscale::GRAYSCALE_STRIP_ROWS;
+  const size_t requiredSize =
+      static_cast<size_t>(renderer.getDisplayWidthBytes()) * EpubGrayscale::GRAYSCALE_STRIP_ROWS;
   if (grayscaleStripScratch && grayscaleStripScratchSize >= requiredSize) {
     return true;
   }

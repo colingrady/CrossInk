@@ -525,3 +525,7 @@ STR_SHORT_PRESS_POWER: "Trumpas maitinimo mygtuko paspaudimas"
 STR_LONG_PRESS_POWER: "Ilgas maitinimo mygtuko paspaudimas"
 STR_LONG_PRESS_BACK: "Ilgas grįžimo mygtuko paspaudimas"
 STR_LONG_PRESS_MENU_SHORTCUT: "Ilgas meniu paspaudimas"
+
+STR_CUSTOM_BOOTSCREEN: "Savas paleidimo ekranas"
+STR_TAP_HIDE_STATUS_BAR: "Bakstelėjus slėpti būsenos juostą"
+STR_PREV_PAGE: "Ankstesnis puslapis"

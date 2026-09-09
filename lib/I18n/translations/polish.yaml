@@ -545,3 +545,7 @@ STR_SHORT_PRESS_POWER: "Krótkie naciśnięcie przycisku zasilania"
 STR_LONG_PRESS_POWER: "Długie naciśnięcie przycisku zasilania"
 STR_LONG_PRESS_BACK: "Długie naciśnięcie przycisku Wstecz"
 STR_LONG_PRESS_MENU_SHORTCUT: "Długie naciśnięcie menu"
+
+STR_CUSTOM_BOOTSCREEN: "Własny ekran startowy"
+STR_TAP_HIDE_STATUS_BAR: "Dotknij, by ukryć pasek stanu"
+STR_PREV_PAGE: "Poprzednia strona"

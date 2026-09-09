@@ -202,8 +202,10 @@ void TxtReaderActivity::loop() {
   const auto touch = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
   if (touch.tapped &&
       ReaderUtils::isBottomStatusBarTap(renderer, touch.y, UITheme::getInstance().getStatusBarHeight())) {
-    statusBarVisible = !statusBarVisible;
-    requestUpdate();
+    if (SETTINGS.tapToHideStatusBar) {
+      statusBarVisible = !statusBarVisible;
+      requestUpdate();
+    }
     return;
   }
   if (consumeLongPowerButtonRelease()) {

@@ -521,3 +521,6 @@ STR_LONG_PRESS_BACK: "לחיצה ארוכה על לחצן החזרה"
 STR_LONG_PRESS_MENU_SHORTCUT: "לחיצה ארוכה על התפריט"
 STR_LONG_PRESS_ACTION: "לחיצה ארוכה"
 STR_LONG_PRESS_MENU_ACTION: "תפריט בלחיצה ארוכה"
+
+STR_CUSTOM_BOOTSCREEN: "מסך פתיחה מותאם"
+STR_TAP_HIDE_STATUS_BAR: "הקשה להסתרת שורת מצב"

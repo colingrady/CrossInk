@@ -700,3 +700,6 @@ STR_SHORT_PRESS_POWER: "Toque curto no botão liga/desliga"
 STR_LONG_PRESS_POWER: "Toque longo no botão liga/desliga"
 STR_LONG_PRESS_BACK: "Toque longo em Voltar"
 STR_LONG_PRESS_MENU_SHORTCUT: "Toque longo no menu"
+
+STR_CUSTOM_BOOTSCREEN: "Tela inicial personalizada"
+STR_TAP_HIDE_STATUS_BAR: "Toque para ocultar barra de status"

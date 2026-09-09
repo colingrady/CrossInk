@@ -525,3 +525,7 @@ STR_SHORT_PRESS_POWER: "Kratek pritisk gumba za vklop"
 STR_LONG_PRESS_POWER: "Dolg pritisk gumba za vklop"
 STR_LONG_PRESS_BACK: "Dolg pritisk gumba Nazaj"
 STR_LONG_PRESS_MENU_SHORTCUT: "Dolg pritisk menija"
+
+STR_CUSTOM_BOOTSCREEN: "Lasten zagonski zaslon"
+STR_TAP_HIDE_STATUS_BAR: "Dotik skrije vrstico stanja"
+STR_PREV_PAGE: "Prejšnja stran"

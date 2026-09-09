@@ -122,6 +122,54 @@ class SimulatorSmokeTest {
     LOG_INF("SMOKE", "Using theme index %d", theme);
   }
 
+  static void verifyReaderControlsSettings() {
+    const auto all = getSettingsList();
+    const auto gestures = buildControlsTapsGesturesSettingsList(all);
+    if (gpio.hasTouch()) {
+      if (gestures.size() < 3 || gestures[0].nameId != StrId::STR_NEXT_PAGE ||
+          gestures[1].nameId != StrId::STR_PREV_PAGE || gestures[0].enumValues != gestures[1].enumValues) {
+        fail("Page gesture settings order/options mismatch");
+      }
+      const size_t statusIndex = gpio.supportsMultiTouch() ? 3 : 2;
+      if (gestures[statusIndex].nameId != StrId::STR_TAP_HIDE_STATUS_BAR) {
+        fail("Status bar gesture setting order mismatch");
+      }
+    } else if (!gestures.empty()) {
+      fail("Touch gestures exposed on a button-only device");
+    }
+    const auto device = buildSystemDeviceSettingsList(all);
+    if (device.size() < 3 || device[1].nameId != StrId::STR_TIME_TO_SLEEP ||
+        device[2].nameId != StrId::STR_CUSTOM_BOOTSCREEN) {
+      fail("Custom bootscreen setting order mismatch");
+    }
+    JsonDocument original;
+    SETTINGS.toJson(original);
+    for (uint8_t mode = 0; mode <= CrossPointSettings::PAGE_TURN_GESTURE_DISABLED; ++mode) {
+      JsonDocument legacy;
+      legacy["pageTurnGesture"] = mode;
+      SETTINGS.fromJson(legacy.as<JsonVariantConst>());
+      if (SETTINGS.pageTurnGesture != mode || SETTINGS.previousPageGesture != mode) {
+        fail("Legacy page gesture migration mismatch");
+      }
+    }
+    SETTINGS.previousPageGesture = CrossPointSettings::SWIPE_ONLY;
+    SETTINGS.pageTurnGesture = CrossPointSettings::TAP_ONLY;
+    SETTINGS.customBootscreenEnabled = 0;
+    SETTINGS.tapToHideStatusBar = 0;
+    JsonDocument saved;
+    SETTINGS.toJson(saved);
+    SETTINGS.previousPageGesture = CrossPointSettings::TAP_AND_SWIPE;
+    SETTINGS.customBootscreenEnabled = 1;
+    SETTINGS.tapToHideStatusBar = 1;
+    SETTINGS.fromJson(saved.as<JsonVariantConst>());
+    if (SETTINGS.previousPageGesture != CrossPointSettings::SWIPE_ONLY ||
+        SETTINGS.pageTurnGesture != CrossPointSettings::TAP_ONLY || SETTINGS.customBootscreenEnabled ||
+        SETTINGS.tapToHideStatusBar) {
+      fail("Reader controls settings round-trip mismatch");
+    }
+    SETTINGS.fromJson(original.as<JsonVariantConst>());
+  }
+
   static void verifyUpDownShortcutAvailability() {
     const auto allSettings = getSettingsList();
     const auto sideButtonSettings = buildControlsSideButtonSettingsList(allSettings);
@@ -187,6 +235,7 @@ class SimulatorSmokeTest {
           fail("Simulator Home key timing contract failed");
         }
         verifyUpDownShortcutAvailability();
+        verifyReaderControlsSettings();
         applyRequestedTheme();
         activityManager.goHome();
         queueStep("Home", SmokeStep::Home);
@@ -426,10 +475,10 @@ class SimulatorSmokeTest {
         inputScript.push_back(render("Reader Font opened from touch reader menu", 4));
         inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
         inputScript.push_back(homeTap());
-        inputScript.push_back(render("Reader Menu root restored by simulated Home key tap", 4));
+        inputScript.push_back(render("Reader Menu root restored by simulated Home key tap", 8));
         inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
         inputScript.push_back(homeTap());
-        inputScript.push_back(render("Reader restored by simulated Home key tap at drawer root", 4));
+        inputScript.push_back(render("Reader restored by simulated Home key tap at drawer root", 8));
         inputScript.push_back(assertActivity("EpubReader"));
         inputScript.push_back(homeLongPress());
         inputScript.push_back(render("Reader Menu reopened from simulated Home key hold", 4));

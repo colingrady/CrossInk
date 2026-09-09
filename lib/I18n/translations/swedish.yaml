@@ -581,3 +581,6 @@ STR_SHORT_PRESS_POWER: "Kort tryck på strömknappen"
 STR_LONG_PRESS_POWER: "Långt tryck på strömknappen"
 STR_LONG_PRESS_BACK: "Långt tryck på Tillbaka"
 STR_LONG_PRESS_MENU_SHORTCUT: "Långt tryck på menyn"
+
+STR_CUSTOM_BOOTSCREEN: "Egen startskärm"
+STR_TAP_HIDE_STATUS_BAR: "Tryck döljer statusfältet"

@@ -702,3 +702,6 @@ STR_SHORT_PRESS_POWER: "Pulsación corta del botón de encendido"
 STR_LONG_PRESS_POWER: "Pulsación larga del botón de encendido"
 STR_LONG_PRESS_BACK: "Pulsación larga del botón Atrás"
 STR_LONG_PRESS_MENU_SHORTCUT: "Pulsación larga del menú"
+
+STR_CUSTOM_BOOTSCREEN: "Pantalla de inicio propia"
+STR_TAP_HIDE_STATUS_BAR: "Tocar para ocultar el estado"
