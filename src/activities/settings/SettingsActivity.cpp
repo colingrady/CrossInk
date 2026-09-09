@@ -5,6 +5,7 @@
 #include <HalGPIO.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <WiFi.h>
 
 #include <algorithm>
 #include <cctype>
@@ -1068,7 +1069,18 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResult(std::make_unique<OpdsServerListActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::Network:
-        startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false), resultHandler);
+        startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false),
+                               [](const ActivityResult&) {
+                                 SETTINGS.saveToFile();
+                                 // Settings only manages credentials; no parent needs the connection.
+                                 // Cancelled selections already stop WiFi in the picker.
+                                 if (WiFi.getMode() == WIFI_MODE_NULL) return;
+                                 WiFi.disconnect(false);
+                                 delay(30);
+                                 if (!WiFi.mode(WIFI_OFF)) {
+                                   LOG_ERR("SET", "Failed to stop WiFi after network settings");
+                                 }
+                               });
         break;
       case SettingAction::BackupStats:
         startActivityForResult(std::make_unique<BackupStatsActivity>(renderer, mappedInput), resultHandler);
