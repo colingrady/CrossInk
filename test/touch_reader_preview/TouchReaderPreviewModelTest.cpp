@@ -135,3 +135,43 @@ TEST(TouchReaderPreviewModel, PreservesAttachedSourceTokens) {
   EXPECT_EQ(renderer.drawCalls[1].text, "not");
   EXPECT_EQ(renderer.drawCalls[1].x, 6);
 }
+
+TEST(TouchReaderPreviewModel, SourceLayoutSurvivesPageReleaseAndPreviewReflow) {
+  GfxRenderer renderer;
+  TouchReaderPreviewModel model;
+  {
+    Page page;
+    page.elements.push_back(std::make_unique<PageLine>(makeLine({"aa", "bb"}, 17), 13, 7));
+    page.elements.push_back(std::make_unique<PageLine>(makeLine({"cc", "dd"}, 21), 3, 24));
+    ASSERT_TRUE(model.capture(page, renderer, 1, 100, 11, 19));
+  }
+  model.renderText(renderer, 2, 0, 0, 16, 100, 0, 0, false, false, true);
+  renderer.drawCalls.clear();
+  model.renderSource(renderer, 1, true);
+  ASSERT_EQ(renderer.drawCalls.size(), 4U);
+  EXPECT_EQ(renderer.drawCalls[0].x, 24);
+  EXPECT_EQ(renderer.drawCalls[0].y, 26);
+  EXPECT_EQ(renderer.drawCalls[1].x, 41);
+  EXPECT_EQ(renderer.drawCalls[2].x, 14);
+  EXPECT_EQ(renderer.drawCalls[2].y, 43);
+  EXPECT_EQ(renderer.drawCalls[3].x, 35);
+}
+
+TEST(TouchReaderPreviewModel, NextCaptureReleasesPreviousSourceBlocks) {
+  GfxRenderer renderer;
+  TouchReaderPreviewModel model;
+  std::weak_ptr<TextBlock> previous;
+  {
+    Page page;
+    auto block = makeLine({"aa", "bb"});
+    previous = block;
+    page.elements.push_back(std::make_unique<PageLine>(block, 0, 0));
+    ASSERT_TRUE(model.capture(page, renderer, 1, 100));
+  }
+  EXPECT_FALSE(previous.expired());
+  Page empty;
+  EXPECT_FALSE(model.capture(empty, renderer, 1, 100));
+  EXPECT_TRUE(previous.expired());
+  model.renderSource(renderer, 1, true);
+  EXPECT_TRUE(renderer.drawCalls.empty());
+}

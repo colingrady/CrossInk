@@ -51,12 +51,6 @@
 
 ### Fixed
 
-- Mixed page gestures now give the full page tap area to the only tap-enabled direction; Inverted Tap swaps shared tap zones without disabling the other direction’s swipe setting.
-
-- Waking after a Quick Lock timeout now restores the reading page and orientation before locking input again. (#689)
-
-- Landscape reader menus now clear the previous drawer when switching to a shorter pane, keeping only one drawer visible.
-
 - Opening the reader menu on button-only devices now keeps the clock and battery status visible unless each is set to Always hide.
 - View Clippings now shows loading feedback while preparing the list, so the first tap visibly responds.
 - X4 Pro USB uploads no longer inject task-watchdog errors into the serial transfer response.

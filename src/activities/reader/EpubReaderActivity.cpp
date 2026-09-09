@@ -6650,7 +6650,8 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
       }
     }
     if (touchReaderPreviewModel &&
-        !touchReaderPreviewModel->capture(*page, renderer, fontId, SETTINGS.lineHeightPercent)) {
+        !touchReaderPreviewModel->capture(*page, renderer, fontId, SETTINGS.lineHeightPercent, orientedMarginLeft,
+                                          orientedMarginTop)) {
       LOG_DBG("ERDM", "Skipping touch reader preview outside the 8 KiB/256-run snapshot budget");
     }
   }

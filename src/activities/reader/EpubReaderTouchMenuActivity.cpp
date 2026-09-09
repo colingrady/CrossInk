@@ -316,6 +316,7 @@ EpubReaderTouchMenuActivity::EpubReaderTouchMenuActivity(
                                              READER_AUTO_PAGE_TURN_MAX_SECONDS)),
       state(initialState),
       draft(captureSettings()),
+      sourceSettings(draft),
       saveReaderSettingsCallback(saveReaderSettingsCallback),
       saveReaderSettingsContext(saveReaderSettingsContext),
       saveGlobalSettingsCallback(saveGlobalSettingsCallback),
@@ -1640,14 +1641,31 @@ void EpubReaderTouchMenuActivity::renderPreviewContents(const ReaderSettingsDraf
 
 void EpubReaderTouchMenuActivity::renderPreviewText(const ReaderSettingsDraft& previewSettings,
                                                     const int previewFontId) {
+  const bool sourceLayout = previewSettings.fontFamily == sourceSettings.fontFamily &&
+                            previewSettings.readerFontPointSize == sourceSettings.readerFontPointSize &&
+                            previewSettings.sdFontFamilyName == sourceSettings.sdFontFamilyName &&
+                            previewSettings.lineHeightPercent == sourceSettings.lineHeightPercent &&
+                            previewSettings.wordSpacing == sourceSettings.wordSpacing &&
+                            previewSettings.screenMarginVertical == sourceSettings.screenMarginVertical &&
+                            previewSettings.screenMarginHorizontal == sourceSettings.screenMarginHorizontal &&
+                            previewSettings.paragraphAlignment == sourceSettings.paragraphAlignment &&
+                            previewSettings.bionicReadingEnabled == sourceSettings.bionicReadingEnabled &&
+                            previewSettings.guideReadingEnabled == sourceSettings.guideReadingEnabled;
+  if (sourceLayout) {
+    renderer.beginTextClip(0, 0, renderer.getScreenWidth(), renderer.getScreenHeight() - drawerHeight());
+    previewModel->renderSource(renderer, previewFontId, ReaderUtils::readerForegroundBlack());
+    renderer.endTextClip();
+    return;
+  }
   int orientedTop, orientedRight, orientedBottom, orientedLeft;
   renderer.getOrientedViewableTRBL(&orientedTop, &orientedRight, &orientedBottom, &orientedLeft);
   (void)orientedRight;
   (void)orientedBottom;
   (void)orientedLeft;
   const int clockReservation = ReaderUtils::getTopClockStatusBarReservedHeight(renderer);
-  const int previewYOffset = orientedTop + std::max(static_cast<int>(previewSettings.screenMarginVertical),
-                                                    clockReservation + ReaderUtils::TOP_CLOCK_TEXT_PADDING);
+  const int previewYOffset =
+      orientedTop + std::max(static_cast<int>(previewSettings.screenMarginVertical),
+                             clockReservation > 0 ? clockReservation + ReaderUtils::TOP_CLOCK_TEXT_PADDING : 0);
   const int previewWidth =
       std::max(1, renderer.getScreenWidth() - static_cast<int>(previewSettings.screenMarginHorizontal) * 2);
   renderer.beginTextClip(0, 0, renderer.getScreenWidth(), renderer.getScreenHeight() - drawerHeight());

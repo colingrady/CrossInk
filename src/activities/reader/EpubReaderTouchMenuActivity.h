@@ -91,6 +91,7 @@ class EpubReaderTouchMenuActivity final : public Activity {
 
   ReaderDrawerState state{};
   ReaderSettingsDraft draft{};
+  const ReaderSettingsDraft sourceSettings;
   ReaderSettingsChangeMask changeMask = ReaderSettingsChangeMask::None;
   std::array<std::vector<RowId>, READER_DRAWER_TAB_COUNT> rootRows;
   std::vector<RowId> paneRows;
