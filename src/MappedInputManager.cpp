@@ -137,6 +137,31 @@ size_t buttonIndex(MappedInputManager::Button button) { return static_cast<size_
 
 }  // namespace
 
+void MappedInputManager::update() const {
+  gpio.update();
+  expireReleaseSuppressions();
+}
+
+bool MappedInputManager::wasPhysicallyReleased(const Button button) const {
+#ifdef SIMULATOR
+  if (simulatorReleased[buttonIndex(button)]) {
+    return true;
+  }
+#endif
+  return mapButton(button, &HalGPIO::wasReleased);
+}
+
+void MappedInputManager::expireReleaseSuppressions() const {
+  ReleaseSuppression::FrameState state;
+  state.backHeld = isPhysicalPressed(Button::Back);
+  state.backReleased = wasPhysicallyReleased(Button::Back);
+  state.confirmHeld = isPhysicalPressed(Button::Confirm);
+  state.confirmReleased = wasPhysicallyReleased(Button::Confirm);
+  state.powerHeld = isPhysicalPressed(Button::Power);
+  state.powerReleased = wasPhysicallyReleased(Button::Power);
+  releaseSuppression.expireAfterReleaseFrame(state);
+}
+
 bool MappedInputManager::mapButton(const Button button, bool (HalGPIO::*fn)(uint8_t) const) const {
   const auto sideLayout = static_cast<CrossPointSettings::SIDE_BUTTON_LAYOUT>(SETTINGS.sideButtonLayout);
   const auto side = mapSideLayoutForReaderOrientation(kSideLayouts[sideLayout], readerMode);
@@ -784,8 +809,7 @@ bool MappedInputManager::wasReleased(const Button button) const {
     }
 #endif
 
-    if (suppressBackRelease) {
-      suppressBackRelease = false;
+    if (releaseSuppression.consumeBackRelease()) {
       return false;
     }
 
@@ -794,8 +818,7 @@ bool MappedInputManager::wasReleased(const Button button) const {
 
   if (button == Button::Confirm) {
     if (mapButton(button, &HalGPIO::wasReleased) || wasFrontButtonHintTapped(mappedFrontButtonFor(button))) {
-      if (suppressConfirmRelease) {
-        suppressConfirmRelease = false;
+      if (releaseSuppression.consumeConfirmRelease()) {
         return false;
       }
       return true;
@@ -805,14 +828,11 @@ bool MappedInputManager::wasReleased(const Button button) const {
       return false;
     }
 
-    if (suppressConfirmRelease) {
-      suppressConfirmRelease = false;
-      suppressPowerConfirmRelease = false;
+    if (releaseSuppression.consumeConfirmRelease()) {
       return false;
     }
 
-    if (suppressPowerConfirmRelease) {
-      suppressPowerConfirmRelease = false;
+    if (releaseSuppression.consumePowerConfirmRelease()) {
       return false;
     }
 
@@ -827,9 +847,6 @@ bool MappedInputManager::wasReleased(const Button button) const {
     if (!released) {
       // A release edge stays visible for one full input loop. Once that loop
       // has passed, drop a stale suppression before the next Power press.
-      if (!gpio.isPressed(HalGPIO::BTN_POWER)) {
-        suppressPowerRelease = false;
-      }
       return false;
     }
 
@@ -837,7 +854,7 @@ bool MappedInputManager::wasReleased(const Button button) const {
     // loop. Keep the suppression set until the edge expires so the global
     // shortcut dispatcher cannot consume it first and leave the reader's
     // later handler to run the configured short-Power action.
-    if (suppressPowerRelease) {
+    if (releaseSuppression.consumePowerRelease()) {
       return false;
     }
 
@@ -870,10 +887,19 @@ bool MappedInputManager::isPressed(const Button button) const {
            gpio.getHeldTime() >= SETTINGS.getPowerButtonLongPressDuration();
   }
 
-  if (button == Button::Power && suppressPowerRelease) {
+  if (button == Button::Power && releaseSuppression.isPowerReleaseSuppressed()) {
     return false;
   }
 
+  return mapButton(button, &HalGPIO::isPressed);
+}
+
+bool MappedInputManager::isPhysicalPressed(const Button button) const {
+#ifdef SIMULATOR
+  if (simulatorHeld[buttonIndex(button)]) {
+    return true;
+  }
+#endif
   return mapButton(button, &HalGPIO::isPressed);
 }
 

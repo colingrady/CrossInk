@@ -1611,7 +1611,10 @@ void loop() {
   const unsigned long loopStartTime = millis();
   static unsigned long lastMemPrint = 0;
 
-  gpio.update();
+  // Keep release suppression in the mapped-input layer in sync with every
+  // hardware input frame. A shortcut may open an activity that never queries
+  // the originating button, so its one-shot release guard must still expire.
+  mappedInputManager.update();
 #ifdef SIMULATOR
   simulatorHomeKeyInput.update();
 #endif
