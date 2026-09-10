@@ -4373,22 +4373,26 @@ async function buildCrossInkPxcSidecars(out, zip, xhtmlFiles) {
       const href = resolveCrossInkPxcPath(xhtmlPath, image.getAttribute("src"));
       const imageFile = href && out.file(href);
       if (!imageFile) continue;
-      const data = await imageFile.async("arraybuffer");
-      const bitmap = await createImageBitmap(new Blob([data]));
-      const sourceWidth = bitmap.width;
-      const sourceHeight = bitmap.height;
-      if (bitmap.close) bitmap.close();
-      if (!sourceWidth || !sourceHeight) continue;
-      const size = crossInkPxcSize(sourceWidth, sourceHeight, crossInkPxcStyle(rules, image), viewportWidth, viewportHeight);
-      if (entries.length >= 256 || entries.some((e) => e.href === href) || !crossInkIndexPath(href, 128)) continue;
-      const key = `${href}:${size.width}x${size.height}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const pxcPath = `${CROSSINK_PXC_DIR}/${crossInkPxcPathKey(key)}.pxc2`;
-      const payload = await buildCrossInkPxc(data, size.width, size.height);
-      out.file(pxcPath, payload, { compression: "STORE", createFolders: false });
-      entries.push({ href, pxc: pxcPath, ...size, pxcFormat: "pxc2", pxcBytes: payload.length,
-        pixelCrc32: new DataView(payload.buffer).getUint32(24, true) });
+      try {
+        const data = await imageFile.async("arraybuffer");
+        const bitmap = await createImageBitmap(new Blob([data]));
+        const sourceWidth = bitmap.width;
+        const sourceHeight = bitmap.height;
+        if (bitmap.close) bitmap.close();
+        if (!sourceWidth || !sourceHeight) continue;
+        const size = crossInkPxcSize(sourceWidth, sourceHeight, crossInkPxcStyle(rules, image), viewportWidth, viewportHeight);
+        if (entries.length >= 256 || entries.some((e) => e.href === href) || !crossInkIndexPath(href, 128)) continue;
+        const key = `${href}:${size.width}x${size.height}`;
+        if (seen.has(key)) continue;
+        const pxcPath = `${CROSSINK_PXC_DIR}/${crossInkPxcPathKey(key)}.pxc2`;
+        const payload = await buildCrossInkPxc(data, size.width, size.height);
+        out.file(pxcPath, payload, { compression: "STORE", createFolders: false });
+        seen.add(key);
+        entries.push({ href, pxc: pxcPath, ...size, pxcFormat: "pxc2", pxcBytes: payload.length,
+          pixelCrc32: new DataView(payload.buffer).getUint32(24, true) });
+      } catch (_) {
+        // Sidecars are optional; keep the source EPUB image when a browser cannot decode it.
+      }
     }
   }
   return entries;
