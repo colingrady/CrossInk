@@ -176,7 +176,6 @@ class EpubReaderTouchMenuActivity final : public Activity {
   void completePercentSelection();
   void completeAutoPageTurnSelection();
   void notifyDictionaryFontChanged();
-  void showDestructiveConfirmation(RowId row, EpubReaderMenuAction action);
   void toggleSetting(RowId row);
   void adjustActiveSlider(int delta);
   void setActiveSliderPermille(int16_t permille);

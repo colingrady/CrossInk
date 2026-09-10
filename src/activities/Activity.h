@@ -107,11 +107,10 @@ class Activity {
   virtual std::unique_ptr<Activity> createFrontlightReadingStatsActivity() { return {}; }
   virtual void onFrontlightPanelOpened() {}
   virtual void onFrontlightPanelClosed() { requestUpdate(); }
-  virtual void persistFrontlightPanelSettings() { SETTINGS.saveToFile(); }
   // Readers with per-book overrides can temporarily restore their global
   // defaults around this write. Other activities persist normally.
   virtual void persistGlobalSettings() { SETTINGS.saveToFile(); }
-  virtual void onFrontlightGlobalSettingsOpened() {}
+  virtual bool onFrontlightGlobalSettingsOpened() { return false; }
   virtual void onFrontlightGlobalSettingsClosed() {}
   virtual bool handleFrontlightPanelResult(const FrontlightPanelResult&) { return false; }
   virtual bool handleExternalReaderMenuAction(uint8_t) { return false; }

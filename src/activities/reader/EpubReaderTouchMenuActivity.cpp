@@ -1206,13 +1206,13 @@ void EpubReaderTouchMenuActivity::activateRow(const RowId row) {
       closeAndReturn(false, EpubReaderMenuAction::TOGGLE_COMPLETED);
       return;
     case RowId::DeleteBookmarks:
-      showDestructiveConfirmation(row, EpubReaderMenuAction::DELETE_BOOKMARKS);
+      closeAndReturn(false, EpubReaderMenuAction::DELETE_BOOKMARKS);
       return;
     case RowId::DeleteCache:
-      showDestructiveConfirmation(row, EpubReaderMenuAction::DELETE_CACHE);
+      closeAndReturn(false, EpubReaderMenuAction::DELETE_CACHE);
       return;
     case RowId::DeleteStats:
-      showDestructiveConfirmation(row, EpubReaderMenuAction::DELETE_STATS);
+      closeAndReturn(false, EpubReaderMenuAction::DELETE_STATS);
       return;
     default:
       break;
@@ -1251,22 +1251,6 @@ void EpubReaderTouchMenuActivity::activateRow(const RowId row) {
       return;
   }
   closeAndReturn(false, action, false);
-}
-
-void EpubReaderTouchMenuActivity::showDestructiveConfirmation(const RowId row, const EpubReaderMenuAction action) {
-  static constexpr std::array<StrId, 2> OPTIONS = {StrId::STR_NO, StrId::STR_YES};
-  StrId title = StrId::STR_DELETE;
-  if (row == RowId::DeleteBookmarks) title = StrId::STR_DELETE_BOOKMARKS;
-  if (row == RowId::DeleteCache) title = StrId::STR_DELETE_CACHE;
-  if (row == RowId::DeleteStats) title = StrId::STR_DELETE_BOOK_STATS;
-  optionPopup.show(title, OPTIONS.data(), OPTIONS.size(), 0, [this, action](const int selected) {
-    if (selected == 1) {
-      closeAndReturn(false, action, false);
-      return;
-    }
-    requestUpdate();
-  });
-  requestUpdate();
 }
 
 void EpubReaderTouchMenuActivity::toggleSetting(const RowId row) {

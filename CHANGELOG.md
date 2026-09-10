@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Fixed
+
+- Deleting a book’s cache, bookmarks, or reading stats from the touch reader menu asks for confirmation only once.
+
+### Changed
+
+- Full-screen sleep covers, custom sleep BMPs, and BMP viewing use the display’s dedicated four-tone image mode when supported.
+
 ## [v1.5.1] - 2026-09-09
 
 ### Added

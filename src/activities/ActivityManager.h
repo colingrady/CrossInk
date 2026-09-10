@@ -89,6 +89,7 @@ class ActivityManager {
   // stale child as their backdrop.
   std::atomic<bool> restoredActivityNeedsRender{false};
 
+  Activity* findEpubReader() const;
   bool handleGlobalHomeGesture();
   bool restoreBackdropBehindCurrentOverlay();
 
@@ -157,6 +158,8 @@ class ActivityManager {
   bool handleShortcutAction(CrossPointSettings::SHORT_PWRBTN action);
   bool handleQuickLockUnlock(QuickLockTrigger trigger);
   void persistGlobalSettings();
+  bool beginGlobalSettingsEdit();
+  void endGlobalSettingsEdit();
   void notifyInputLockChanged(bool locked);
   void notifyUserInput();
   bool skipLoopDelay() const;

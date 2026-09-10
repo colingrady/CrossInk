@@ -80,3 +80,5 @@ add_subdirectory(memory_policy)
 add_subdirectory(epub_grayscale)
 
 add_subdirectory(ui_symbol_fallback)
+
+add_subdirectory(absolute_grayscale)

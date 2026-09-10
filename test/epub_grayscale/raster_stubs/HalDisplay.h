@@ -1,4 +1,6 @@
 #pragma once
+#include <GrayscaleCapabilities.h>
+
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -6,6 +8,16 @@ class HalDisplay {
  public:
   static constexpr int DISPLAY_WIDTH = 792, DISPLAY_HEIGHT = 481, DISPLAY_WIDTH_BYTES = 99, BUFFER_SIZE = 99 * 481;
   enum RefreshMode { FULL_REFRESH, HALF_REFRESH, FAST_REFRESH };
+  using GrayscaleMode = freeink::GrayscaleMode;
+  using GrayscaleCapabilities = freeink::GrayscaleCapabilities;
+  bool absoluteSupported = true;
+  int canceled = 0;
+  GrayscaleCapabilities grayscaleCapabilities(GrayscaleMode) const {
+    GrayscaleCapabilities caps;
+    if (absoluteSupported) caps.encoding = freeink::GrayscaleEncoding::AbsolutePlanes;
+    return caps;
+  }
+  bool displayGrayscaleBase(GrayscaleMode, RefreshMode, bool) { return absoluteSupported; }
   int width, height, stride;
   mutable std::vector<uint8_t> bw;
   HalDisplay(int w = 792, int h = 481) : width(w), height(h), stride((w + 7) / 8), bw(stride * h, 0xA5) {}
@@ -36,5 +48,7 @@ class HalDisplay {
   void writeGrayscalePlaneStrip(bool, const uint8_t*, uint16_t, uint16_t) {}
   bool shouldSkipImageBlanking() const { return false; }
   bool supportsStripGrayscale() const { return true; }
-  void cleanupGrayscaleBuffers(const uint8_t*) {}
+  void cleanupGrayscaleBuffers(const uint8_t* buffer) {
+    if (!buffer) ++canceled;
+  }
 };

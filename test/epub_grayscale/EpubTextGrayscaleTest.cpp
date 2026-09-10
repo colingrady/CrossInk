@@ -156,3 +156,83 @@ TEST(EpubTextGrayscaleTest, RealTextRasterMatchesFullAndStripTargets) {
       }
 }
 }  // namespace
+
+TEST(AbsoluteImageRaster, TextMatchesBlackWhiteInBothPlanesAndCancellationResetsMode) {
+  fakeheap::reset(true);
+  Storage.reset();
+  RasterFont fixture(12);
+  HalDisplay display;
+  GfxRenderer renderer(display);
+  renderer.begin();
+  renderer.insertFont(1, EpdFontFamily(&fixture.font));
+  for (int orientation = 0; orientation < 4; ++orientation) {
+    renderer.setOrientation(GfxRenderer::Orientation(orientation));
+    renderer.clearScreen();
+    renderer.drawText(1, 25, 40, "Book cover");
+    const auto expected = display.bw;
+    ASSERT_TRUE(renderer.displayAbsoluteGrayscaleBase());
+    for (auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
+      renderer.clearScreen();
+      renderer.setRenderMode(mode);
+      renderer.drawText(1, 25, 40, "Book cover");
+      EXPECT_EQ(display.bw, expected);
+    }
+    renderer.setRenderMode(GfxRenderer::BW);
+    EXPECT_FALSE(renderer.grayPlanesAreAbsolute());
+  }
+  EXPECT_EQ(display.canceled, 4);
+  display.absoluteSupported = false;
+  EXPECT_FALSE(renderer.supportsAbsoluteGrayscale());
+  EXPECT_FALSE(renderer.displayAbsoluteGrayscaleBase());
+  EXPECT_FALSE(renderer.grayPlanesAreAbsolute());
+}
+
+TEST(AbsoluteImageRaster, BitmapPlanesPreserveFourTonesAndWhiteMargins) {
+  fakeheap::reset(true);
+  Storage.reset();
+  // Two identical bottom-up rows of black/dark/light/white, padded to four bytes.
+  auto data = std::make_shared<HostFileData>();
+  data->bytes.resize(78, 0);
+  auto put16 = [&](int offset, uint16_t value) { memcpy(data->bytes.data() + offset, &value, 2); };
+  auto put32 = [&](int offset, uint32_t value) { memcpy(data->bytes.data() + offset, &value, 4); };
+  put16(0, 0x4d42);
+  put32(2, 78);
+  put32(10, 70);
+  put32(14, 40);
+  put32(18, 4);
+  put32(22, 2);
+  put16(26, 1);
+  put16(28, 2);
+  put32(34, 8);
+  put32(46, 4);
+  for (int level = 0; level < 4; ++level)
+    for (int channel = 0; channel < 3; ++channel) data->bytes[54 + level * 4 + channel] = level * 85;
+  data->bytes[70] = data->bytes[74] = 0x1b;
+  HalFile file(data);
+  Bitmap bitmap(file);
+  ASSERT_EQ(bitmap.parseHeaders(), BmpReaderError::Ok);
+  HalDisplay display(8, 4);
+  GfxRenderer renderer(display);
+  renderer.begin();
+  renderer.setOrientation(GfxRenderer::LandscapeCounterClockwise);
+  ASSERT_TRUE(renderer.displayAbsoluteGrayscaleBase());
+  int plane = 0;
+  for (auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
+    ASSERT_EQ(bitmap.rewindToData(), BmpReaderError::Ok);
+    renderer.clearScreen();
+    renderer.setRenderMode(mode);
+    ASSERT_TRUE(renderer.drawBitmap(bitmap, 0, 3, 8, 4));
+    // The first file row lies below the screen. The second must still be read.
+    EXPECT_EQ(display.bw[0], 0xff);
+    EXPECT_EQ(display.bw[1], 0xff);
+    EXPECT_EQ(display.bw[2], 0xff);
+    EXPECT_EQ(display.bw[3], plane++ == 0 ? 0x5f : 0x3f);
+  }
+  // A truncated second pass must be reported, allowing the caller to cancel it.
+  ASSERT_EQ(bitmap.rewindToData(), BmpReaderError::Ok);
+  data->readFailAt = 74;
+  EXPECT_FALSE(renderer.drawBitmap(bitmap, 0, 0, 8, 4));
+  renderer.setRenderMode(GfxRenderer::BW);
+  EXPECT_EQ(display.canceled, 1);
+  file.close();
+}
