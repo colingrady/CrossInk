@@ -138,8 +138,8 @@ int16_t measureWordAdvanceX(const GfxRenderer& renderer, const int fontId, const
 }
 
 int16_t measureWordAdvanceX(const GfxRenderer& renderer, const int fontId, const char* word, const size_t length,
-                            const EpdFontFamily::Style style, const uint8_t focusBoundary,
-                            const uint16_t focusSuffixX, char* scratch, const size_t scratchCapacity) {
+                            const EpdFontFamily::Style style, const uint8_t focusBoundary, const uint16_t focusSuffixX,
+                            char* scratch, const size_t scratchCapacity) {
   if (focusBoundary == 0 || focusSuffixX == 0) {
     return measureWordAdvanceX(renderer, fontId, word, length, style, scratch, scratchCapacity);
   }

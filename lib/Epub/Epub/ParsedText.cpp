@@ -279,7 +279,7 @@ uint32_t lastCodepointBeforeByteOffset(const std::string& word, const size_t byt
 }
 
 FocusTokenMetadata computeFocusMetadata(const std::string_view segment, const EpdFontFamily::Style baseStyle,
-                                          const bool focusReadingEnabled) {
+                                        const bool focusReadingEnabled) {
   if (!focusReadingEnabled || (baseStyle & EpdFontFamily::BOLD) != 0 || segment.empty()) {
     return {baseStyle, 0};
   }
@@ -320,7 +320,7 @@ FocusTokenMetadata computeFocusMetadata(const std::string_view segment, const Ep
 }
 
 int measureFocusRunOffset(const GfxRenderer& renderer, const int fontId, const std::string& word,
-                           const EpdFontFamily::Style style, const uint8_t boundary, const bool rtl) {
+                          const EpdFontFamily::Style style, const uint8_t boundary, const bool rtl) {
   if (boundary == 0 || boundary >= word.size()) {
     return 0;
   }
@@ -1825,10 +1825,9 @@ bool ParsedText::extractLine(Arena& scratchArena, const size_t breakIndex, const
     const bool wordIsRtl = BidiUtils::detectParagraphLevel(lineWords[i].c_str(), blockStyle.isRtl ? 1 : 0) ==
                            static_cast<int>(BidiUtils::BidiBaseDir::RTL);
     const uint16_t runOffset =
-        boundary > 0
-            ? static_cast<uint16_t>(std::max(
-                  0, measureFocusRunOffset(renderer, fontId, lineWords[i], lineWordStyles[i], boundary, wordIsRtl)))
-            : 0;
+        boundary > 0 ? static_cast<uint16_t>(std::max(0, measureFocusRunOffset(renderer, fontId, lineWords[i],
+                                                                               lineWordStyles[i], boundary, wordIsRtl)))
+                     : 0;
 
     outWords.push_back(std::move(lineWords[i]));
     outXPos.push_back(lineXPos[i]);

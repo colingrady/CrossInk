@@ -442,8 +442,8 @@ bool Section::createSectionFile(const ReaderRenderSpec& spec, const std::functio
           "Create section start: spine=%d mode=%u preview=%u viewport=%ux%u image=%u focus=%u guide=%u free=%u "
           "maxAlloc=%u",
           spineIndex, static_cast<unsigned>(renderMode), buildOptions.isPreview() ? 1U : 0U, viewportWidth,
-          viewportHeight, imageRendering, effectiveFocusReadingEnabled, effectiveGuideReadingEnabled,
-          ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+          viewportHeight, imageRendering, effectiveFocusReadingEnabled, effectiveGuideReadingEnabled, ESP.getFreeHeap(),
+          ESP.getMaxAllocHeap());
   MemoryBudget::logEpubHeapPools("section build start");
 
   // Create cache directory if it doesn't exist

@@ -670,8 +670,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                             "extraParagraphSpacing", StrId::STR_CAT_READER));
     add(SettingInfo::Toggle(StrId::STR_FORCE_PARAGRAPH_INDENTS, &CrossPointSettings::forceParagraphIndents,
                             "forceParagraphIndents", StrId::STR_CAT_READER));
-    add(SettingInfo::Toggle(StrId::STR_FOCUS_READING, &CrossPointSettings::focusReadingEnabled,
-                            "focusReadingEnabled", StrId::STR_CAT_READER));
+    add(SettingInfo::Toggle(StrId::STR_FOCUS_READING, &CrossPointSettings::focusReadingEnabled, "focusReadingEnabled",
+                            StrId::STR_CAT_READER));
     add(SettingInfo::Toggle(StrId::STR_GUIDE_READING, &CrossPointSettings::guideReadingEnabled, "guideReadingEnabled",
                             StrId::STR_CAT_READER));
     add(SettingInfo::Enum(StrId::STR_INDEXING_METHOD, &CrossPointSettings::indexingMethod,

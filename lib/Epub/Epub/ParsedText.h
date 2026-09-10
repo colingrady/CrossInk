@@ -28,10 +28,10 @@ class ParsedText {
   // each, they never approach the contiguous-block ceiling.
   std::deque<std::string> words;
   std::vector<EpdFontFamily::Style> wordStyles;
-  std::vector<bool> wordContinues;          // true = word attaches to previous (no space before it)
-  std::vector<bool> wordNoSpaceBefore;      // true = may break before token, but no synthetic space when joined
+  std::vector<bool> wordContinues;         // true = word attaches to previous (no space before it)
+  std::vector<bool> wordNoSpaceBefore;     // true = may break before token, but no synthetic space when joined
   std::vector<uint8_t> wordFocusBoundary;  // UTF-8 byte offset where the regular suffix starts; 0 = no split
-  std::vector<bool> wordGuideDotBefore;     // true = virtual guide dot belongs between previous token and this one
+  std::vector<bool> wordGuideDotBefore;    // true = virtual guide dot belongs between previous token and this one
   std::vector<uint8_t> wordBackgroundBlack;
   // Layout-only text coordinates. The rendered page never retains these; use
   // compact deltas while a paragraph is pending to protect C3 heap headroom.

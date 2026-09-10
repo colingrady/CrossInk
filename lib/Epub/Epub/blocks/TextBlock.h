@@ -29,12 +29,12 @@ class TextBlock final : public Block {
   const int16_t* xposArr = nullptr;
   // Distance from the word's left edge to the second visual run. The suffix is
   // second for LTR words; the bold logical prefix is second for RTL words.
-  const uint16_t* focusRunOffsetArr = nullptr;  // null when !focusPresent
+  const uint16_t* focusRunOffsetArr = nullptr;   // null when !focusPresent
   const uint16_t* guideDotXOffsetArr = nullptr;  // null when !guideDotsPresent
   const uint8_t* stylesArr = nullptr;
   const uint8_t* focusBoundaryArr = nullptr;  // null when !focusPresent
-  const uint8_t* wordFlagsArr = nullptr;       // null when !wordFlagsPresent
-  const uint8_t* wordSpacesArr = nullptr;      // null when !wordSpacesPresent
+  const uint8_t* wordFlagsArr = nullptr;      // null when !wordFlagsPresent
+  const uint8_t* wordSpacesArr = nullptr;     // null when !wordSpacesPresent
   const char* textArr = nullptr;
   std::vector<std::string> rubyTexts;
 

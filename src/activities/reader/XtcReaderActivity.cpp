@@ -383,8 +383,7 @@ void XtcReaderActivity::loop() {
                                      : mappedInput.wasReleased(MappedInputManager::Button::PageForward);
   const bool frontPrev = mappedInput.wasReleased(MappedInputManager::Button::Left);
   const bool powerReleased = mappedInput.wasReleased(MappedInputManager::Button::Power);
-  if (longPowerPageTurnHandled &&
-      (powerReleased || !mappedInput.isPressed(MappedInputManager::Button::Power))) {
+  if (longPowerPageTurnHandled && (powerReleased || !mappedInput.isPressed(MappedInputManager::Button::Power))) {
     longPowerPageTurnHandled = false;
     return;
   }
