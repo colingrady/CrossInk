@@ -53,7 +53,7 @@ class EpubReaderActivity final : public Activity {
     uint8_t imageRendering = 0;
     uint8_t extraParagraphSpacing = 1;
     uint8_t forceParagraphIndents = 0;
-    uint8_t bionicReadingEnabled = 0;
+    uint8_t focusReadingEnabled = 0;
     uint8_t guideReadingEnabled = 0;
     uint8_t epubRenderMode = 0;
     uint8_t indexingMethod = CrossPointSettings::INDEXING_FULL_SECTION;

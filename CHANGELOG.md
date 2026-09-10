@@ -114,7 +114,7 @@
 - SD-card font and clipping work now release temporary data at the right time, preserving memory for reflow, dictionary use, covers, and thumbnails on X3/X4.
 - EPUBs with book-specific built-in fonts no longer load an unnecessary global SD-card font, and custom fonts retain ligatures.
 - EPUB styling choices apply before style caches load; CSS-heavy books use less temporary memory; and disabling Embedded Style consistently skips unused stylesheet work.
-- EPUB layout now keeps CJK ruby and spaces, Russian paragraph continuations, Bionic Reading, underline/strikethrough runs, and right-to-left text correct.
+- EPUB layout now keeps CJK ruby and spaces, Russian paragraph continuations, Focus Reading, underline/strikethrough runs, and right-to-left text correct.
 - EPUBs with flowing `<br>` elements, image-led or decorative chapter headings, unsupported images, and dense final pages now lay out without excess gaps, clipping, dropped images, or misleading low-memory warnings.
 - EPUB footnote and cross-reference previews now show complete notes, including targets in the middle of a paragraph.
 - Saved EPUB positions, clipping highlights, and selections now stay accurate after font, orientation, or indexing changes; selections also remain readable in dark mode and on memory-tight pages.
@@ -216,7 +216,7 @@
 - Web file manager multi-delete now handles larger selections without failing after a small batch.
 - Portuguese EPUBs now use Portuguese hyphenation rules instead of leaving long words unhyphenated when Hyphenation is enabled.
 - Progressive JPEG EPUB covers now render more smoothly in generated cover and thumbnail BMP assets.
-- EPUB section layout now flushes long text runs earlier when Bionic Reading or Guide Dots are enabled, reducing low-memory failures on difficult books.
+- EPUB section layout now flushes long text runs earlier when Focus Reading or Guide Dots are enabled, reducing low-memory failures on difficult books.
 - Footnotes in EPUBs with very large shared notes sections no longer cause long stalls when opened.
 - Firmware updates now follow GitHub asset redirects before streaming the install.
 - Tiled grayscale rendering now serializes display transfers on the shared SPI bus to avoid display glitches during SD activity.

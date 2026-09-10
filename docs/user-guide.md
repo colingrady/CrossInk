@@ -287,10 +287,10 @@ device model and build.
   - "ON" - Vertical space will be added between paragraphs in Reading Mode
   - "OFF" - Paragraphs will not have vertical space added, but will have first-line indentation
 
-- **Reader Dark Mode**, **Embedded Style**, **Images**, **Bionic Reading**, and
+- **Reader Dark Mode**, **Embedded Style**, **Images**, **Focus Reading**, and
   **Guide Dots** are directly available from the Reader settings. See
   [Reader Features](./reader-features.md) for their behavior, including the
-  [Bionic Reading](./reader-features.md#bionic-reading) guide.
+  [Focus Reading](./reader-features.md#focus-reading) guide.
 
 - **Touch Reader Controls**: Enable or disable touchscreen page turns and
   reader-menu swipe gestures on supported devices. Device-specific full-screen
@@ -336,7 +336,7 @@ which status-bar items are shown.
   - "Ignore" (default) - Require a long press to turn off the device
   - "Sleep" - A short press puts the device into sleep mode
   - "Page Turn" - A short press in reading mode turns to the next page; a long press turns the device off
-  - "Toggle Bookmark", "Reading Stats", "Mark Finished", "Refresh", "Change Font", "Guide Dots", "Bionic Reading", "Auto Page Turn", "Sync Progress", "File Transfer", "Calibre Wireless", "Join a Network", "Create Hotspot", "Screenshot", "Dark Mode", "Browse Files", or "Save Clipping" - Run the matching action
+  - "Toggle Bookmark", "Reading Stats", "Mark Finished", "Refresh", "Change Font", "Guide Dots", "Focus Reading", "Auto Page Turn", "Sync Progress", "File Transfer", "Calibre Wireless", "Join a Network", "Create Hotspot", "Screenshot", "Dark Mode", "Browse Files", or "Save Clipping" - Run the matching action
   - "Footnotes" - A short press in reading mode opens the footnotes submenu; if only one footnote is present on the page, the referenced page is opened directly. The short press on the power button can be used to select the footnote in the submenu, and to go back to the original page after finish reading the footnote (like the back button).
 
 - **Quick-return from footnotes**: Toggles on and off the quick return functionality from the footnotes. When the functionality it's active, a short press of the power button will act as the back button from the footnotes page.

@@ -228,7 +228,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     FORCE_REFRESH = 3,
     TOGGLE_FONT = 4,
     TOGGLE_GUIDE_DOTS = 5,
-    TOGGLE_BIONIC_READING = 6,
+    TOGGLE_FOCUS_READING = 6,
     TOGGLE_BOOKMARK = 7,
     SYNC_PROGRESS = 8,
     MARK_FINISHED = 9,
@@ -278,7 +278,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     CHORD_FORCE_REFRESH = 10,
     CHORD_TOGGLE_FONT = 11,
     CHORD_TOGGLE_GUIDE_DOTS = 12,
-    CHORD_TOGGLE_BIONIC_READING = 13,
+    CHORD_TOGGLE_FOCUS_READING = 13,
     CHORD_CYCLE_PAGE_TURN = 14,
     CHORD_SYNC_PROGRESS = 15,
     CHORD_FILE_TRANSFER = 16,
@@ -364,7 +364,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     LONG_MENU_SLEEP = 1,
     LONG_MENU_CHANGE_FONT = 2,
     LONG_MENU_TOGGLE_GUIDE_DOTS = 3,
-    LONG_MENU_TOGGLE_BIONIC = 4,
+    LONG_MENU_TOGGLE_FOCUS = 4,
     LONG_MENU_TOGGLE_BOOKMARK = 5,
     LONG_MENU_REFRESH_SCREEN = 6,
     LONG_MENU_SYNC_PROGRESS = 7,
@@ -557,7 +557,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // EPUB section indexing policy. The current chapter keeps its active build.
   uint8_t indexingMethod = INDEXING_FULL_SECTION;
   // Focus Reading - emphasizes the first part of words with bold
-  uint8_t bionicReadingEnabled = 0;
+  uint8_t focusReadingEnabled = 0;
   // Guide Dots - places a middle dot between words to guide the eye
   uint8_t guideReadingEnabled = 0;
   // Per-book EPUB render mode runtime value. This is intentionally not saved as a global setting.

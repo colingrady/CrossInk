@@ -729,8 +729,8 @@ CrossPointSettings::SHORT_PWRBTN chordPowerAction(const ButtonShortcutController
       return Power::TOGGLE_FONT;
     case Chord::ToggleGuideDots:
       return Power::TOGGLE_GUIDE_DOTS;
-    case Chord::ToggleBionicReading:
-      return Power::TOGGLE_BIONIC_READING;
+    case Chord::ToggleFocusReading:
+      return Power::TOGGLE_FOCUS_READING;
     case Chord::CyclePageTurn:
       return Power::CYCLE_PAGE_TURN;
     case Chord::SyncProgress:

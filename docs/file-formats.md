@@ -160,7 +160,7 @@ settings for the book. It also stores a per-book EPUB render mode override,
 which can be changed from book action menus before opening the book so a
 problematic EPUB can be moved to Balanced or Light rendering without entering
 the reader first. Safe Mode also uses this file to save Light rendering with
-embedded styles, Bionic Reading, and Guide Dots disabled after that final
+embedded styles, Focus Reading, and Guide Dots disabled after that final
 fallback successfully opens a difficult book.
 
 ```c++
@@ -185,7 +185,7 @@ struct ReaderSettingsBin {
     u8 imageRendering;
     u8 extraParagraphSpacing;
     u8 forceParagraphIndents;
-    u8 bionicReadingEnabled;
+    u8 focusReadingEnabled;
     u8 guideReadingEnabled;
     u8 snapshotRenderMode;
     u8 indexingMethod; // 0 = incremental, 1 = full section
@@ -348,7 +348,7 @@ Version 57 is binary-identical to version 56. The version was bumped because
 word-gap suppression now applies only to tokens glued together in the source.
 Older caches could collapse explicit spaces between Hangul words, so full and
 suspended partial section caches rebuild together. Version 58 recalculates
-Bionic Reading split-run offsets with the renderer's combined advance and
+Focus Reading split-run offsets with the renderer's combined advance and
 kerning rounding, so old cached page positions rebuild.
 
 Version 56 changes `<br>` layout: a line break after text no longer reapplies
@@ -367,7 +367,7 @@ read only its header and defer full extraction until the page is shown. Version
 52 keeps Guide Dots centered when extra word spacing is enabled. Version 51
 preserves continuation state for oversized CJK word fragments. Version 50
 paginates chapter-heading image runs within the reader viewport so they do not
-overflow into the reserved status-bar area. Version 49 stores Bionic Reading
+overflow into the reserved status-bar area. Version 49 stores Focus Reading
 split-run offsets in visual order so RTL word prefixes render on the right.
 Version 48 changed Arabic contextual shaping and text measurement, so cached
 word positions from version 47 no longer match what `drawText` renders.
@@ -380,17 +380,17 @@ anchor behavior introduced in version 45. It includes:
 
 - cache-busting fields for font, line compression, extra paragraph spacing,
   forced paragraph indents, paragraph alignment, viewport size, hyphenation,
-  embedded CSS, image rendering mode, Bionic Reading, Guide Dots, word spacing,
+  embedded CSS, image rendering mode, Focus Reading, Guide Dots, word spacing,
   and EPUB render mode
 - page offset LUT
 - anchor-to-page map for fragment and footnote navigation
 - paragraph and list-item LUTs used by KOReader sync page refinement
 - visible-text-offset LUT used to resolve page positions across reflow and sync
-- optional per-word Bionic Reading split metadata
+- optional per-word Focus Reading split metadata
 - optional per-word Guide Dot x-offset metadata
 - optional per-word text flags for CSS backgrounds, layout-inserted hyphens,
   and internal-link IDs
-- reading-aid layout that stores Bionic Reading and Guide Dots as per-word metadata instead of temporary layout words
+- reading-aid layout that stores Focus Reading and Guide Dots as per-word metadata instead of temporary layout words
 - publisher CSS page-break handling and adjusted justification spacing baked into page layout
 - table fragments
 - per-page footnote entries
@@ -471,7 +471,7 @@ struct BlockStyle {
 
 struct TextBlock {
     u16 wordCount;
-    u8 hasBionic;
+    u8 hasFocus;
     u8 hasGuideDots;
     u8 hasWordFlags;
     u16 textBytes [[comment("Total size of text[], including one NUL per word")]];
@@ -479,15 +479,15 @@ struct TextBlock {
     if (wordCount > 0) {
         u16 textOff[wordCount] [[comment("Byte offset of word i's text within text[]")]];
         s16 wordXPos[wordCount];
-        if (hasBionic != 0) {
-            u16 wordBionicSuffixX[wordCount] [[comment("Suffix x offset from word start")]];
+        if (hasFocus != 0) {
+            u16 wordFocusSuffixX[wordCount] [[comment("Suffix x offset from word start")]];
         }
         if (hasGuideDots != 0) {
             u16 wordGuideDotXOffset[wordCount] [[comment("Guide dot x offset from word start; 0 means no dot")]];
         }
         WordStyle wordStyle[wordCount];
-        if (hasBionic != 0) {
-            u8 wordBionicBoundary[wordCount] [[comment("UTF-8 byte boundary between bold prefix and suffix")]];
+        if (hasFocus != 0) {
+            u8 wordFocusBoundary[wordCount] [[comment("UTF-8 byte boundary between bold prefix and suffix")]];
         }
         if (hasWordFlags != 0) {
             u8 wordFlags[wordCount] [[comment("bit 0 = black background, bit 1 = layout-inserted trailing hyphen")]];
@@ -616,7 +616,7 @@ struct SectionBin {
     bool hyphenationEnabled;
     bool embeddedStyle;
     u8 imageRendering;
-    bool bionicReadingEnabled;
+    bool focusReadingEnabled;
     bool guideReadingEnabled;
     u8 wordSpacing;
     u8 renderMode; // 0 = CrossInk Default, 1 = Balanced, 2 = Light

@@ -429,7 +429,7 @@ ReaderSettingsDraft EpubReaderTouchMenuActivity::captureSettings() {
   value.orientation = SETTINGS.orientation;
   value.paragraphAlignment = SETTINGS.paragraphAlignment;
   value.textAntiAliasing = SETTINGS.textAntiAliasing;
-  value.bionicReadingEnabled = SETTINGS.bionicReadingEnabled;
+  value.focusReadingEnabled = SETTINGS.focusReadingEnabled;
   value.guideReadingEnabled = SETTINGS.guideReadingEnabled;
   value.hyphenationEnabled = SETTINGS.hyphenationEnabled;
   value.publisherPageNumbers = SETTINGS.publisherPageNumbers;
@@ -454,7 +454,7 @@ void EpubReaderTouchMenuActivity::applySettings(const ReaderSettingsDraft& value
   SETTINGS.orientation = value.orientation;
   SETTINGS.paragraphAlignment = value.paragraphAlignment;
   SETTINGS.textAntiAliasing = value.textAntiAliasing;
-  SETTINGS.bionicReadingEnabled = value.bionicReadingEnabled;
+  SETTINGS.focusReadingEnabled = value.focusReadingEnabled;
   SETTINGS.guideReadingEnabled = value.guideReadingEnabled;
   SETTINGS.hyphenationEnabled = value.hyphenationEnabled;
   SETTINGS.publisherPageNumbers = value.publisherPageNumbers;
@@ -1189,7 +1189,7 @@ void EpubReaderTouchMenuActivity::activateRow(const RowId row) {
       }
       return;
     case RowId::TextAa:
-    case RowId::Bionic:
+    case RowId::Focus:
     case RowId::GuideDots:
     case RowId::Hyphenation:
     case RowId::PublisherPages:
@@ -1259,8 +1259,8 @@ void EpubReaderTouchMenuActivity::toggleSetting(const RowId row) {
     case RowId::TextAa:
       draft.textAntiAliasing = !draft.textAntiAliasing;
       break;
-    case RowId::Bionic:
-      draft.bionicReadingEnabled = !draft.bionicReadingEnabled;
+    case RowId::Focus:
+      draft.focusReadingEnabled = !draft.focusReadingEnabled;
       break;
     case RowId::GuideDots:
       draft.guideReadingEnabled = !draft.guideReadingEnabled;
@@ -1288,7 +1288,7 @@ void EpubReaderTouchMenuActivity::toggleSetting(const RowId row) {
     // makes the in-drawer preview appear to zoom while the page reflows.
     markSettingChanged(ReaderSettingsChangeMask::Preview | ReaderSettingsChangeMask::NonLayout);
   } else {
-    const bool previews = row == RowId::Bionic || row == RowId::GuideDots;
+    const bool previews = row == RowId::Focus || row == RowId::GuideDots;
     markSettingChanged(previews ? ReaderSettingsChangeMask::Preview | ReaderSettingsChangeMask::Relayout
                                 : ReaderSettingsChangeMask::Relayout);
   }
@@ -1634,7 +1634,7 @@ void EpubReaderTouchMenuActivity::renderPreviewText(const ReaderSettingsDraft& p
                             previewSettings.screenMarginVertical == sourceSettings.screenMarginVertical &&
                             previewSettings.screenMarginHorizontal == sourceSettings.screenMarginHorizontal &&
                             previewSettings.paragraphAlignment == sourceSettings.paragraphAlignment &&
-                            previewSettings.bionicReadingEnabled == sourceSettings.bionicReadingEnabled &&
+                            previewSettings.focusReadingEnabled == sourceSettings.focusReadingEnabled &&
                             previewSettings.guideReadingEnabled == sourceSettings.guideReadingEnabled;
   if (sourceLayout) {
     renderer.beginTextClip(0, 0, renderer.getScreenWidth(), renderer.getScreenHeight() - drawerHeight());
@@ -1656,7 +1656,7 @@ void EpubReaderTouchMenuActivity::renderPreviewText(const ReaderSettingsDraft& p
   renderer.beginTextClip(0, 0, renderer.getScreenWidth(), renderer.getScreenHeight() - drawerHeight());
   previewModel->renderText(renderer, previewFontId, previewSettings.screenMarginHorizontal, previewYOffset,
                            previewWidth, previewSettings.lineHeightPercent, previewSettings.wordSpacing,
-                           previewSettings.paragraphAlignment, previewSettings.bionicReadingEnabled,
+                           previewSettings.paragraphAlignment, previewSettings.focusReadingEnabled,
                            previewSettings.guideReadingEnabled, ReaderUtils::readerForegroundBlack());
   renderer.endTextClip();
 }
@@ -1838,8 +1838,8 @@ const char* EpubReaderTouchMenuActivity::rowLabel(const RowId row) const {
       return tr(STR_SPACING);
     case RowId::TextAa:
       return tr(STR_TEXT_AA);
-    case RowId::Bionic:
-      return tr(STR_BIONIC_READING);
+    case RowId::Focus:
+      return tr(STR_FOCUS_READING);
     case RowId::GuideDots:
       return tr(STR_GUIDE_READING);
     case RowId::Margins:
@@ -1971,7 +1971,7 @@ const char* EpubReaderTouchMenuActivity::rowValue(const RowId row, char* buffer,
 bool EpubReaderTouchMenuActivity::rowIsToggle(const RowId row) const {
   switch (row) {
     case RowId::TextAa:
-    case RowId::Bionic:
+    case RowId::Focus:
     case RowId::GuideDots:
     case RowId::Hyphenation:
     case RowId::PublisherPages:
@@ -2009,8 +2009,8 @@ bool EpubReaderTouchMenuActivity::rowToggleValue(const RowId row) const {
   switch (row) {
     case RowId::TextAa:
       return draft.textAntiAliasing;
-    case RowId::Bionic:
-      return draft.bionicReadingEnabled;
+    case RowId::Focus:
+      return draft.focusReadingEnabled;
     case RowId::GuideDots:
       return draft.guideReadingEnabled;
     case RowId::Hyphenation:

@@ -77,7 +77,7 @@ struct ReaderLayoutSettingsSnapshot {
   uint8_t imageRendering;
   uint8_t extraParagraphSpacing;
   uint8_t forceParagraphIndents;
-  uint8_t bionicReadingEnabled;
+  uint8_t focusReadingEnabled;
   uint8_t guideReadingEnabled;
   uint8_t epubRenderMode;
   // Indexing method is a build policy, not a layout input. A mode-only change
@@ -102,7 +102,7 @@ ReaderLayoutSettingsSnapshot captureReaderLayoutSettings() {
       SETTINGS.imageRendering,
       SETTINGS.extraParagraphSpacing,
       SETTINGS.forceParagraphIndents,
-      SETTINGS.bionicReadingEnabled,
+      SETTINGS.focusReadingEnabled,
       SETTINGS.guideReadingEnabled,
       SETTINGS.epubRenderMode,
   };
@@ -130,7 +130,7 @@ ReaderSettingsChangeMask classifyReaderSettingsChange(const ReaderLayoutSettings
       before.hyphenationEnabled != after.hyphenationEnabled ||
       before.extraParagraphSpacing != after.extraParagraphSpacing ||
       before.forceParagraphIndents != after.forceParagraphIndents ||
-      before.bionicReadingEnabled != after.bionicReadingEnabled ||
+      before.focusReadingEnabled != after.focusReadingEnabled ||
       before.guideReadingEnabled != after.guideReadingEnabled || before.imageRendering != after.imageRendering ||
       before.epubRenderMode != after.epubRenderMode ||
       std::strncmp(before.sdFontFamilyName, after.sdFontFamilyName, sizeof(before.sdFontFamilyName)) != 0) {

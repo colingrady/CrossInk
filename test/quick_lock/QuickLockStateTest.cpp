@@ -123,7 +123,7 @@ TEST(ButtonShortcutController, EveryChordActionConsumesBothReleaseOrders) {
       Action::Screenshot,       Action::QuickLock,           Action::Sleep,
       Action::PageTurn,         Action::ToggleBookmark,      Action::ReadingStats,
       Action::MarkFinished,     Action::ForceRefresh,        Action::ToggleFont,
-      Action::ToggleGuideDots,  Action::ToggleBionicReading, Action::CyclePageTurn,
+      Action::ToggleGuideDots,  Action::ToggleFocusReading, Action::CyclePageTurn,
       Action::SyncProgress,     Action::FileTransfer,        Action::CalibreWireless,
       Action::JoinNetwork,      Action::CreateHotspot,       Action::ToggleDarkMode,
       Action::Footnotes,        Action::FileBrowser,         Action::CreateClipping,

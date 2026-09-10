@@ -260,7 +260,7 @@ std::array<EpubRenderMode, 3> fallbackModesForSelection(const EpubRenderMode sel
 struct SectionBuildProfile {
   EpubRenderMode renderMode;
   bool embeddedStyle;
-  bool bionicReadingEnabled;
+  bool focusReadingEnabled;
   bool guideReadingEnabled;
   const char* label;
   bool safeMode;
@@ -281,14 +281,14 @@ const char* sectionBuildLabelForRenderMode(const EpubRenderMode renderMode) {
 SectionBuildProfile buildProfileForRenderMode(const EpubRenderMode renderMode) {
   return SectionBuildProfile{renderMode,
                              SETTINGS.embeddedStyle != 0,
-                             SETTINGS.bionicReadingEnabled != 0,
+                             SETTINGS.focusReadingEnabled != 0,
                              SETTINGS.guideReadingEnabled != 0,
                              sectionBuildLabelForRenderMode(renderMode),
                              false};
 }
 
 bool shouldAttemptSafeModeFallback() {
-  return SETTINGS.embeddedStyle != 0 || SETTINGS.bionicReadingEnabled != 0 || SETTINGS.guideReadingEnabled != 0;
+  return SETTINGS.embeddedStyle != 0 || SETTINGS.focusReadingEnabled != 0 || SETTINGS.guideReadingEnabled != 0;
 }
 
 SectionBuildProfile safeModeBuildProfile() {
@@ -346,7 +346,7 @@ ReaderRenderSpec readerRenderSpecForProfile(const int fontId, const uint16_t vie
   ReaderRenderSpec spec = SETTINGS.readerRenderSpec(viewportWidth, viewportHeight, profile.renderMode);
   spec.fontId = fontId;
   spec.embeddedStyle = profile.embeddedStyle;
-  spec.bionicReadingEnabled = profile.bionicReadingEnabled;
+  spec.focusReadingEnabled = profile.focusReadingEnabled;
   spec.guideReadingEnabled = profile.guideReadingEnabled;
   return spec;
 }
@@ -361,7 +361,7 @@ void ensureReaderSdFontLoaded(GfxRenderer& renderer) {
 void applySafeModeReaderSettings() {
   SETTINGS.epubRenderMode = static_cast<uint8_t>(EpubRenderMode::Light);
   SETTINGS.embeddedStyle = 0;
-  SETTINGS.bionicReadingEnabled = 0;
+  SETTINGS.focusReadingEnabled = 0;
   SETTINGS.guideReadingEnabled = 0;
 }
 
@@ -1038,7 +1038,7 @@ void captureReaderSettings(EpubReaderActivity::ReaderSettingsSnapshot& out) {
   out.imageRendering = SETTINGS.imageRendering;
   out.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
   out.forceParagraphIndents = SETTINGS.forceParagraphIndents;
-  out.bionicReadingEnabled = SETTINGS.bionicReadingEnabled;
+  out.focusReadingEnabled = SETTINGS.focusReadingEnabled;
   out.guideReadingEnabled = SETTINGS.guideReadingEnabled;
   out.epubRenderMode = normalizeRenderModeRaw(SETTINGS.epubRenderMode);
   out.indexingMethod = SETTINGS.indexingMethod;
@@ -1078,7 +1078,7 @@ void applyReaderSettings(const EpubReaderActivity::ReaderSettingsSnapshot& in) {
       in.imageRendering < CrossPointSettings::IMAGE_RENDERING_COUNT ? in.imageRendering : SETTINGS.imageRendering;
   SETTINGS.extraParagraphSpacing = in.extraParagraphSpacing ? 1 : 0;
   SETTINGS.forceParagraphIndents = in.forceParagraphIndents ? 1 : 0;
-  SETTINGS.bionicReadingEnabled = in.bionicReadingEnabled ? 1 : 0;
+  SETTINGS.focusReadingEnabled = in.focusReadingEnabled ? 1 : 0;
   SETTINGS.guideReadingEnabled = in.guideReadingEnabled ? 1 : 0;
   SETTINGS.epubRenderMode = normalizeRenderModeRaw(in.epubRenderMode);
   SETTINGS.indexingMethod = in.indexingMethod < CrossPointSettings::INDEXING_METHOD_COUNT
@@ -1112,7 +1112,7 @@ bool readReaderSettingsSnapshot(FsFile& file, EpubReaderActivity::ReaderSettings
         readU8(file, out.embeddedStyle) && readU8(file, out.hyphenationEnabled) && readU8(file, out.textAntiAliasing) &&
         (!includesLegacyReaderDarkMode || readU8(file, discardedLegacyReaderDarkMode)) &&
         readU8(file, out.imageRendering) && readU8(file, out.extraParagraphSpacing) &&
-        readU8(file, out.forceParagraphIndents) && readU8(file, out.bionicReadingEnabled) &&
+        readU8(file, out.forceParagraphIndents) && readU8(file, out.focusReadingEnabled) &&
         readU8(file, out.guideReadingEnabled))) {
     return false;
   }
@@ -1134,7 +1134,7 @@ bool writeReaderSettingsSnapshot(FsFile& file, const EpubReaderActivity::ReaderS
          writeU8(file, in.paragraphAlignment) && writeU8(file, in.embeddedStyle) &&
          writeU8(file, in.hyphenationEnabled) && writeU8(file, in.textAntiAliasing) &&
          writeU8(file, in.imageRendering) && writeU8(file, in.extraParagraphSpacing) &&
-         writeU8(file, in.forceParagraphIndents) && writeU8(file, in.bionicReadingEnabled) &&
+         writeU8(file, in.forceParagraphIndents) && writeU8(file, in.focusReadingEnabled) &&
          writeU8(file, in.guideReadingEnabled) && writeU8(file, normalizeRenderModeRaw(in.epubRenderMode)) &&
          writeU8(file, in.indexingMethod < CrossPointSettings::INDEXING_METHOD_COUNT
                            ? in.indexingMethod
@@ -4542,8 +4542,8 @@ void EpubReaderActivity::executeReaderQuickAction(CrossPointSettings::LONG_PRESS
       SETTINGS.guideReadingEnabled = !SETTINGS.guideReadingEnabled;
       reindexCurrentSection();
       break;
-    case CrossPointSettings::LONG_MENU_TOGGLE_BIONIC:
-      SETTINGS.bionicReadingEnabled = !SETTINGS.bionicReadingEnabled;
+    case CrossPointSettings::LONG_MENU_TOGGLE_FOCUS:
+      SETTINGS.focusReadingEnabled = !SETTINGS.focusReadingEnabled;
       reindexCurrentSection();
       break;
     case CrossPointSettings::LONG_MENU_TOGGLE_BOOKMARK:
@@ -4662,8 +4662,8 @@ bool EpubReaderActivity::handleShortcutAction(const uint8_t rawAction) {
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_GUIDE_DOTS:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_GUIDE_DOTS);
       return true;
-    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BIONIC_READING:
-      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BIONIC);
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_FOCUS_READING:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_FOCUS);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BOOKMARK:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BOOKMARK);
@@ -4748,8 +4748,8 @@ bool EpubReaderActivity::handleShortcutAction(const CrossPointSettings::SHORT_PW
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_GUIDE_DOTS:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_GUIDE_DOTS);
       return true;
-    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BIONIC_READING:
-      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BIONIC);
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_FOCUS_READING:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_FOCUS);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BOOKMARK:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BOOKMARK);
@@ -4884,8 +4884,8 @@ bool EpubReaderActivity::executeShortPowerButtonAction() {
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_GUIDE_DOTS:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_GUIDE_DOTS);
       return true;
-    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BIONIC_READING:
-      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BIONIC);
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_FOCUS_READING:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_FOCUS);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BOOKMARK:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BOOKMARK);
@@ -4989,8 +4989,8 @@ bool EpubReaderActivity::executeLongPowerButtonAction() {
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_GUIDE_DOTS:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_GUIDE_DOTS);
       return true;
-    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BIONIC_READING:
-      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BIONIC);
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_FOCUS_READING:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_FOCUS);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BOOKMARK:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BOOKMARK);
@@ -5724,10 +5724,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
           usedRenderMode = profile.renderMode;
           safeModeBuildSucceeded = profile.safeMode;
           LOG_DBG("ERS",
-                  "%s section cache built: spine=%d font=%d mode=%u embedded=%u bionic=%u guide=%u pages=%u free=%u "
+                  "%s section cache built: spine=%d font=%d mode=%u embedded=%u focus=%u guide=%u pages=%u free=%u "
                   "maxAlloc=%u building=%u",
                   profile.label, currentSpineIndex, fontId, static_cast<unsigned>(profile.renderMode),
-                  static_cast<unsigned>(profile.embeddedStyle), static_cast<unsigned>(profile.bionicReadingEnabled),
+                  static_cast<unsigned>(profile.embeddedStyle), static_cast<unsigned>(profile.focusReadingEnabled),
                   static_cast<unsigned>(profile.guideReadingEnabled), section->pageCount, ESP.getFreeHeap(),
                   ESP.getMaxAllocHeap(), section->isBuilding() ? 1U : 0U);
         }
@@ -7238,7 +7238,7 @@ void EpubReaderActivity::refreshChapterGroupEstimate(const uint16_t viewportWidt
   mix(SETTINGS.hyphenationEnabled);
   mix(SETTINGS.embeddedStyle);
   mix(SETTINGS.imageRendering);
-  mix(SETTINGS.bionicReadingEnabled);
+  mix(SETTINGS.focusReadingEnabled);
   mix(SETTINGS.guideReadingEnabled);
   mix(SETTINGS.wordSpacing);
   mix(SETTINGS.epubRenderMode);

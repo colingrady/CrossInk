@@ -86,7 +86,7 @@ TEST(TouchReaderPreviewModel, NormalWordSpacingRemovesTheAdditionalPreviewGap) {
 
 TEST(TouchReaderPreviewModel, WordSpacingUsesSourceWhitespaceInsteadOfPixelGaps) {
   Page page;
-  // The source's Bionic/SD-font metrics can put this word at the same x
+  // The source's Focus/SD-font metrics can put this word at the same x
   // position a plain whole-word advance would predict. The whitespace bit is
   // still authoritative and must survive into the preview.
   page.elements.push_back(std::make_unique<PageLine>(makeLine({"aa", "bb"}, 2), 0, 0));

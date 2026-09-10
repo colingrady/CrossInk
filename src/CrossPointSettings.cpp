@@ -990,7 +990,7 @@ ReaderRenderSpec CrossPointSettings::readerRenderSpec(const uint16_t viewportWid
   spec.hyphenationEnabled = hyphenationEnabled != 0;
   spec.embeddedStyle = embeddedStyle != 0;
   spec.imageRendering = imageRendering;
-  spec.bionicReadingEnabled = bionicReadingEnabled != 0;
+  spec.focusReadingEnabled = focusReadingEnabled != 0;
   spec.guideReadingEnabled = guideReadingEnabled != 0;
   spec.wordSpacing = wordSpacing;
   spec.renderMode = renderMode;

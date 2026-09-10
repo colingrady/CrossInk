@@ -662,20 +662,20 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
 }
 
 size_t ChapterHtmlSlimParser::bufferedWordsBeforeLayoutLimit() const {
-  if (bionicReadingEnabled && guideReadingEnabled) {
+  if (focusReadingEnabled && guideReadingEnabled) {
     return COMBINED_READING_AID_BUFFERED_WORDS_BEFORE_LAYOUT;
   }
-  if (bionicReadingEnabled || guideReadingEnabled) {
+  if (focusReadingEnabled || guideReadingEnabled) {
     return SINGLE_READING_AID_BUFFERED_WORDS_BEFORE_LAYOUT;
   }
   return embeddedStyle ? CSS_BUFFERED_WORDS_BEFORE_LAYOUT : DEFAULT_BUFFERED_WORDS_BEFORE_LAYOUT;
 }
 
 uint16_t ChapterHtmlSlimParser::textRunBytesBeforeLayoutLimit() const {
-  if (bionicReadingEnabled && guideReadingEnabled) {
+  if (focusReadingEnabled && guideReadingEnabled) {
     return COMBINED_READING_AID_TEXT_RUN_BYTES_BEFORE_LAYOUT;
   }
-  if (bionicReadingEnabled || guideReadingEnabled) {
+  if (focusReadingEnabled || guideReadingEnabled) {
     return SINGLE_READING_AID_TEXT_RUN_BYTES_BEFORE_LAYOUT;
   }
   return DEFAULT_TEXT_RUN_BYTES_BEFORE_LAYOUT;
@@ -754,7 +754,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   flushPendingAnchor();
   currentTextBlock.reset(new (std::nothrow)
                              ParsedText(extraParagraphSpacing, forceParagraphIndents, hyphenationEnabled,
-                                        bionicReadingEnabled, guideReadingEnabled, wordSpacing, blockStyle));
+                                        focusReadingEnabled, guideReadingEnabled, wordSpacing, blockStyle));
   if (!currentTextBlock) {
     const auto heap = MemoryBudget::snapshot();
     LOG_ERR("EHP", "Failed to create text block (%u free, %u max alloc)", heap.freeHeap, heap.maxAllocHeap);

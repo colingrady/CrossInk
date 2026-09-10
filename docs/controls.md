@@ -139,7 +139,7 @@ Available actions include:
 - Refresh Screen
 - Change Font
 - Guide Dots
-- Bionic Reading
+- Focus Reading
 - Toggle Bookmark
 - Sync Progress
 - Mark as Finished
