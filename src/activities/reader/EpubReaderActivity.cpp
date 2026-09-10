@@ -2980,6 +2980,9 @@ void EpubReaderActivity::loop() {
     return;
   }
   if (executeLongPowerButtonAction()) {
+    // Reader long-press actions execute while Power is still held. Consume its
+    // later release so the app-wide shortcut dispatcher cannot run it again.
+    mappedInput.suppressNextPowerRelease();
     return;
   }
 
@@ -5030,7 +5033,6 @@ bool EpubReaderActivity::executeLongPowerButtonAction() {
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_TILT_PAGE_TURN);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_DARK_MODE:
-      mappedInput.suppressNextPowerRelease();
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_DARK_MODE);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::FOOTNOTES:
