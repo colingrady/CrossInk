@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -1310,12 +1311,12 @@ void EpubReaderTouchMenuActivity::showEnumOptions(const RowId row) {
       static constexpr std::array<CrossPointSettings::FONT_SIZE, CrossPointSettings::FONT_SIZE_COUNT> BUILTIN_SIZES = {
           CrossPointSettings::TINY, CrossPointSettings::SMALL, CrossPointSettings::MEDIUM, CrossPointSettings::LARGE};
       raw.reserve(BUILTIN_SIZES.size());
-      for (const auto size : BUILTIN_SIZES) {
-        raw.push_back(CrossPointSettings::getReaderFontPointSize(size));
-      }
+      std::transform(BUILTIN_SIZES.begin(), BUILTIN_SIZES.end(), std::back_inserter(raw),
+                     [](const auto size) { return CrossPointSettings::getReaderFontPointSize(size); });
     }
     labels.reserve(raw.size());
-    for (const uint8_t size : raw) labels.push_back(fontSizePointLabel(size));
+    std::transform(raw.begin(), raw.end(), std::back_inserter(labels),
+                   [](const uint8_t size) { return fontSizePointLabel(size); });
     const auto it = std::find(raw.begin(), raw.end(), draft.readerFontPointSize);
     const int current = it == raw.end() ? 0 : static_cast<int>(std::distance(raw.begin(), it));
     openEnumOptions(row, StrId::STR_FONT_SIZE, std::move(labels), std::move(raw), current);

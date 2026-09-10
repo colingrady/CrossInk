@@ -132,6 +132,9 @@ class TouchReaderPreviewModel {
 
   // Keep the source blocks alive so unchanged settings use the reader's exact
   // rendering, including justification, ruby, bidi, and bionic run positions.
+  // TextBlock::render writes pixels through the renderer, so this must remain
+  // a mutable reference despite cppcheck not seeing that dependency.
+  // cppcheck-suppress constParameterReference
   void renderSource(GfxRenderer& renderer, const int fontId, const bool foregroundBlack) const {
     if (!valid()) return;
     for (size_t i = 0; i < lineCount; ++i) {
@@ -270,7 +273,7 @@ class TouchReaderPreviewModel {
     const auto* cursor = reinterpret_cast<const unsigned char*>(value);
     while (true) {
       const uint32_t codepoint = utf8NextCodepoint(&cursor);
-      if (codepoint == 0 || codepoint != 0x00AD) return codepoint;
+      if (codepoint != 0x00AD) return codepoint;
     }
   }
 
