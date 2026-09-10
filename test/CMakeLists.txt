@@ -83,3 +83,6 @@ add_subdirectory(epub_grayscale)
 add_subdirectory(ui_symbol_fallback)
 
 add_subdirectory(absolute_grayscale)
+
+add_subdirectory(buffered_file)
+add_subdirectory(ota_boot_switch)
