@@ -789,9 +789,9 @@ bool MappedInputManager::wasReleased(const Button button) const {
     return true;
   }
 #ifdef SIMULATOR
-  if (simulatorReleased[buttonIndex(button)]) {
-    return true;
-  }
+  const bool simulatedRelease = simulatorReleased[buttonIndex(button)];
+#else
+  constexpr bool simulatedRelease = false;
 #endif
 
   if (button == Button::Back) {
@@ -800,11 +800,12 @@ bool MappedInputManager::wasReleased(const Button button) const {
     }
 
 #if CROSSINK_APP_CAP_TOUCH
-    if (!mapButton(button, &HalGPIO::wasReleased) && !wasFrontButtonHintTapped(mappedFrontButtonFor(button))) {
+    if (!simulatedRelease && !mapButton(button, &HalGPIO::wasReleased) &&
+        !wasFrontButtonHintTapped(mappedFrontButtonFor(button))) {
       return false;
     }
 #else
-    if (!mapButton(button, &HalGPIO::wasReleased)) {
+    if (!simulatedRelease && !mapButton(button, &HalGPIO::wasReleased)) {
       return false;
     }
 #endif
@@ -817,7 +818,8 @@ bool MappedInputManager::wasReleased(const Button button) const {
   }
 
   if (button == Button::Confirm) {
-    if (mapButton(button, &HalGPIO::wasReleased) || wasFrontButtonHintTapped(mappedFrontButtonFor(button))) {
+    if (simulatedRelease || mapButton(button, &HalGPIO::wasReleased) ||
+        wasFrontButtonHintTapped(mappedFrontButtonFor(button))) {
       if (releaseSuppression.consumeConfirmRelease()) {
         return false;
       }
@@ -843,7 +845,7 @@ bool MappedInputManager::wasReleased(const Button button) const {
   }
 
   if (button == Button::Power) {
-    const bool released = mapButton(button, &HalGPIO::wasReleased);
+    const bool released = simulatedRelease || mapButton(button, &HalGPIO::wasReleased);
     if (!released) {
       // A release edge stays visible for one full input loop. Once that loop
       // has passed, drop a stale suppression before the next Power press.
@@ -862,7 +864,7 @@ bool MappedInputManager::wasReleased(const Button button) const {
   }
 
   const uint8_t frontButton = mappedFrontButtonFor(button);
-  return mapButton(button, &HalGPIO::wasReleased) ||
+  return simulatedRelease || mapButton(button, &HalGPIO::wasReleased) ||
          (frontButton != kNoButton && wasFrontButtonHintTapped(frontButton));
 }
 

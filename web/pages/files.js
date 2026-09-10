@@ -3672,7 +3672,7 @@ async function findEpubCoverImagePaths(zip) {
   const opfPath = await findOPFPath(zip);
   const entry = opfPath && zip.files[opfPath];
   if (!entry) return new Set();
-  const doc = new DOMParser().parseFromString(await entry.async("text"), "application/xml");
+  const doc = new DOMParser().parseFromString(await safeReadText(entry), "application/xml");
   if (doc.getElementsByTagName("parsererror").length) return new Set();
 
   const coverId = Array.from(doc.getElementsByTagName("meta"))
