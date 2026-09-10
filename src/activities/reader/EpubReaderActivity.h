@@ -363,6 +363,7 @@ class EpubReaderActivity final : public Activity {
   bool saveProgress(int spineIndex, int currentPage, int pageCount, bool allowDuringFootnotePreview = false);
   bool queueProgressSave(int spineIndex, int currentPage, int pageCount, bool forceSave = false);
   bool flushQueuedProgress();
+  bool saveFootnoteOriginProgress();
   void cacheCurrentSectionPosition();
   void pauseReadingPaceTimer(const char* reason = "unknown");
   void resumeReadingPaceTimer(const char* reason = "unknown");

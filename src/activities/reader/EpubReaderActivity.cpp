@@ -2264,20 +2264,9 @@ void EpubReaderActivity::onExit() {
   // Leaving mid-footnote loses the in-RAM return stack on deep sleep; persist the
   // pre-footnote position so the book reopens at the link origin, not the footnote.
   if (footnoteDepth > 0 && epub) {
-    const SavedPosition& origin = savedPositions[0];
-    // Record the origin chapter's real page count. A zero reads back as a valid
-    // record with hasPageCount set, which breaks the percent math on reopen.
-    // A preview section describes the note rather than the origin chapter, so its page
-    // count is not usable here; fall back to the last count persisted for that spine.
-    int originPageCount = 0;
-    if (!activeFootnotePreview && section && origin.spineIndex == currentSpineIndex) {
-      originPageCount = section->estimatedTotalPages();
-    } else if (lastSavedSpineIndex == origin.spineIndex) {
-      originPageCount = std::max(0, lastSavedPageCount);
+    if (!saveFootnoteOriginProgress()) {
+      LOG_ERR("ERS", "Failed to save footnote origin on exit");
     }
-    // Forced past the footnote-preview suppression: this origin position is exactly what
-    // that suppression protects, so it is the one save that must go through.
-    saveProgress(origin.spineIndex, origin.pageNumber, originPageCount, /*allowDuringFootnotePreview=*/true);
   }
 
   BOOKMARKS.unload();
@@ -3756,17 +3745,15 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::SYNC: {
-      if (activeFootnotePreview) {
-        requestUpdate();
-        break;
-      }
       if (KOREADER_STORE.hasCredentials()) {
         const int currentPage = section ? section->currentPage : nextPageNumber;
         const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
 
         // Persist current position so the reader resumes at the right page on return.
         // goToReader() depends on this file, so abort the sync if the write fails.
-        if (!saveProgress(currentSpineIndex, currentPage, totalPages)) {
+        const bool saved =
+            footnoteDepth > 0 ? saveFootnoteOriginProgress() : saveProgress(currentSpineIndex, currentPage, totalPages);
+        if (!saved) {
           LOG_ERR("KOSync", "Aborting sync because current progress could not be saved");
           pendingSyncSaveError = true;
           requestUpdate();
@@ -3783,6 +3770,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           break;
         }
 
+        if (replacementResume) APP_STATE.setPendingOverlayResume(*replacementResume);
         pauseReadingPaceTimer("sync_progress");
         activityManager.replaceActivity(std::move(restartActivity));
       }
@@ -4054,10 +4042,12 @@ bool EpubReaderActivity::handleFrontlightPanelResult(const FrontlightPanelResult
   resume.selectedIndex = result.state.selectedAction;
   resume.bookPath = epub->getPath();
   if (result.action == FrontlightPanelAction::SyncProgress) {
+    if (!KOREADER_STORE.hasCredentials()) return startGlobalSyncProgress();
     resume.readerOrientation = SETTINGS.orientation;
     resume.preserveReaderOrientation = true;
-    if (KOREADER_STORE.hasCredentials()) APP_STATE.setPendingOverlayResume(resume);
-    return startGlobalSyncProgress();
+    // Use the reader's save-and-handoff path; a direct network restart skips onExit().
+    onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::SYNC, false, &resume);
+    return true;
   }
   if (result.action == FrontlightPanelAction::NearbyPositionSync) {
     onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::NEARBY_POSITION_SYNC, false, &resume);
@@ -6514,6 +6504,23 @@ bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
     progressSaveDebouncer.markPersisted(positionKey, static_cast<uint32_t>(pageCount));
   }
   return saved;
+}
+
+bool EpubReaderActivity::saveFootnoteOriginProgress() {
+  const SavedPosition& origin = savedPositions[0];
+  // Record the origin chapter's real page count. A zero reads back as a valid
+  // record with hasPageCount set, which breaks the percent math on reopen.
+  // A preview section describes the note rather than the origin chapter, so its page
+  // count is not usable here; fall back to the last count persisted for that spine.
+  int originPageCount = 0;
+  if (!activeFootnotePreview && section && origin.spineIndex == currentSpineIndex) {
+    originPageCount = section->estimatedTotalPages();
+  } else if (lastSavedSpineIndex == origin.spineIndex) {
+    originPageCount = std::max(0, lastSavedPageCount);
+  }
+  // Forced past the footnote-preview suppression: this origin position is exactly what
+  // that suppression protects, so it is the one save that must go through.
+  return saveProgress(origin.spineIndex, origin.pageNumber, originPageCount, /*allowDuringFootnotePreview=*/true);
 }
 
 bool EpubReaderActivity::queueProgressSave(const int spineIndex, const int currentPage, const int pageCount,
