@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Quick Lock sleep now respects the configured short Power-button wake behavior.
 - Quick Lock now clears when the device wakes after an automatic sleep timeout.
 - EPUB content marked with the HTML hidden attribute no longer appears in the reader.
 - End-of-book selection remains consistent during concurrent redraws.

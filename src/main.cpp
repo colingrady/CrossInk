@@ -1054,8 +1054,7 @@ bool readWakeShortPressFromNvs() {
 
 void mirrorWakeShortPressToNvs() {
 #ifndef SIMULATOR
-  const uint8_t expected =
-      (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP || APP_STATE.quickLockResumePending) ? 1 : 0;
+  const uint8_t expected = SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP ? 1 : 0;
   nvs_handle_t handle;
   if (nvs_open(WAKE_NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) return;
   uint8_t current = 0;
@@ -1381,16 +1380,12 @@ void setup() {
   // skips the panel-clearing pass and the X3 initial-full-sync arming (see
   // HalDisplay::begin), so the first paint is FAST_REFRESH (~500ms) over the
   // retained frame and input dispatches against a visible UI.
-  // X4 Pro cuts its switched rails during sleep and wakes with a POWERON reset,
-  // while C3 boards normally report DEEPSLEEP. HalGPIO normalizes both hardware
-  // paths to PowerButton, so use that route with the one-shot persisted flag.
   if (APP_STATE.quickLockResumePending) {
-    // This marker only enables the short Power-button wake route. Do not carry
-    // its temporary Quick Lock or frontlight state into the new session.
+    // A timeout wake starts an unlocked session. Keep this separate from the
+    // persisted short Power-button wake policy used before settings load.
     APP_STATE.quickLockResumePending = false;
     APP_STATE.quickLockRestoreFrontlight = false;
     APP_STATE.saveToFile();
-    mirrorWakeShortPressToNvs();
   }
   // A boot-screen folder or an explicitly selected BMP opts a reader into
   // seeing its boot image after a power-button wake as well as a cold boot.
@@ -1724,7 +1719,7 @@ void loop() {
       APP_STATE.quickLockResumePending = true;
       enterDeepSleep(true);
       // The simulator's deep sleep returns, unlike hardware. Keep its next
-      // test loop from treating the marker as a real reboot restore.
+      // test loop from treating the marker as a real reboot resume.
 #ifdef SIMULATOR
       APP_STATE.quickLockResumePending = false;
 #endif
