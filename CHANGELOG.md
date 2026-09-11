@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Exiting Calibre Wireless on X4 now returns Home with one clean screen refresh instead of repeated blank flashes.
 - Manage Fonts no longer crashes after Wi-Fi connects on ESP32-S3 readers.
 
 ## [v1.5.1] - 2026-09-10
