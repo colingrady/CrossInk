@@ -544,15 +544,13 @@ CrossPointSettings::SHORT_PWRBTN getPowerButtonAction() {
   return action;
 }
 
-void notifyQuickLockChanged(const bool restoringAfterWake = false) {
+void notifyQuickLockChanged() {
   const bool locked = buttonShortcutController.isQuickLocked();
   x4ProHomeKeyTapPending = false;
   mappedInputManager.clearInjectedReleases();
   LOG_DBG("MAIN", "Quick Lock %s", locked ? "enabled" : "disabled");
   if (locked) {
-    if (!restoringAfterWake) {
-      APP_STATE.quickLockRestoreFrontlight = Frontlight.isOn();
-    }
+    APP_STATE.quickLockRestoreFrontlight = Frontlight.isOn();
     Frontlight.setOn(false);
     activityManager.notifyInputLockChanged(true);
     int top = 0;
@@ -1348,10 +1346,6 @@ void setup() {
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
   logBootHeap("boot state ready");
-  // X4 Pro wakes through a POWERON reset, so keep its frontlight off until
-  // the saved Quick Lock is explicitly unlocked below.
-  const bool restoreQuickLockAfterWake = APP_STATE.quickLockResumePending && isSleepWake && !recoveryFirmwareMode &&
-                                         !rebootedFromPanic && !isNetworkResume && !isSilentReboot;
   // Internal silent restarts retain the current light state. Network entry and
   // exit restarts must honor Restore on Wake like a normal user wake.
   const bool wasLightOnBeforeSleep = SETTINGS.frontlightOn != 0;
@@ -1373,9 +1367,6 @@ void setup() {
       restoreLightOn = false;
     }
   }
-  if (restoreQuickLockAfterWake) {
-    restoreLightOn = false;
-  }
   Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, restoreLightOn);
 
   if (recoveryFirmwareMode) {
@@ -1393,12 +1384,11 @@ void setup() {
   // X4 Pro cuts its switched rails during sleep and wakes with a POWERON reset,
   // while C3 boards normally report DEEPSLEEP. HalGPIO normalizes both hardware
   // paths to PowerButton, so use that route with the one-shot persisted flag.
-  const auto quickLockResumeTrigger = static_cast<QuickLockTrigger>(APP_STATE.quickLockResumeTrigger);
   if (APP_STATE.quickLockResumePending) {
-    // Consume this before routing so a later cold boot cannot inherit a stale
-    // lock if reader restoration itself fails.
+    // This marker only enables the short Power-button wake route. Do not carry
+    // its temporary Quick Lock or frontlight state into the new session.
     APP_STATE.quickLockResumePending = false;
-    APP_STATE.quickLockResumeTrigger = static_cast<uint8_t>(QuickLockTrigger::None);
+    APP_STATE.quickLockRestoreFrontlight = false;
     APP_STATE.saveToFile();
     mirrorWakeShortPressToNvs();
   }
@@ -1593,19 +1583,6 @@ void setup() {
     gpio.update();
   }
 
-  if (restoreQuickLockAfterWake) {
-    // Finish queued navigation (including Reader -> EPUB/TXT/XTC) before
-    // locking: the locked main loop intentionally does not dispatch activities.
-    // Waiting for a render alone would paint the temporary Reader loader and
-    // strand its pending transition, losing the page and its orientation.
-    activityManager.loop();
-    // Paint the reconstructed route before saving the badge backdrop. The wake
-    // release remains swallowed, so it cannot immediately unlock the device.
-    (void)activityManager.requestUpdateAndWait();
-    buttonShortcutController.restoreQuickLock(millis(), quickLockResumeTrigger);
-    notifyQuickLockChanged(true);
-  }
-
   allowSleepAt = millis() + 2000;
 }
 
@@ -1745,7 +1722,6 @@ void loop() {
     if (sleepTimeoutMs > 0 && buttonShortcutController.shouldQuickLockSleep(millis(), sleepTimeoutMs)) {
       LOG_DBG("SLP", "Quick Lock timeout triggered after %lu ms", sleepTimeoutMs);
       APP_STATE.quickLockResumePending = true;
-      APP_STATE.quickLockResumeTrigger = static_cast<uint8_t>(buttonShortcutController.quickLockTrigger());
       enterDeepSleep(true);
       // The simulator's deep sleep returns, unlike hardware. Keep its next
       // test loop from treating the marker as a real reboot restore.

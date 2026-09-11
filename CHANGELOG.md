@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Quick Lock now clears when the device wakes after an automatic sleep timeout.
 - Exiting Calibre Wireless on X4 now returns Home with one clean screen refresh instead of repeated blank flashes.
 - Manage Fonts no longer crashes after Wi-Fi connects on ESP32-S3 readers.
 

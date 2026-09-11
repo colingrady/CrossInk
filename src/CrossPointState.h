@@ -34,12 +34,11 @@ class CrossPointState : public PersistableStore<CrossPointState> {
   uint8_t readerActivityLoadCount = 0;
   bool lastSleepFromReader = false;
   bool showBootScreen = true;
-  // One-shot marker set only when Quick Lock puts the device to sleep.
+  // One-shot marker that lets a Quick Lock timeout wake on a short Power press.
+  // It is consumed on boot and must not restore Quick Lock itself.
   bool quickLockResumePending = false;
-  // Serialized raw QuickLockTrigger value for the one permitted post-wake unlock.
-  uint8_t quickLockResumeTrigger = 0;
   // True only when Quick Lock turned an active frontlight off. It survives a
-  // Quick Lock timeout so the permitted unlock can restore the user's light.
+  // normal Quick Lock session so its matching unlock can restore the light.
   bool quickLockRestoreFrontlight = false;
   PendingOverlayResume pendingOverlayResume{};
 
