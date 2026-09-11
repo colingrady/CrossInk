@@ -2,6 +2,8 @@
 
 ### Added
 
+- Hidden folders can be crated using the web file manager now when prefixed with a dot.
+
 ### Changed
 
 ### Fixed

@@ -1021,7 +1021,29 @@ void CrossPointWebServer::handleCreateFolder() const {
     return;
   }
 
-  const String folderName = StringUtils::sanitizeFilename(server->arg("name").c_str()).c_str();
+  const String requestedName = server->arg("name");
+  size_t leadingDots = 0;
+  while (leadingDots < requestedName.length() && requestedName[leadingDots] == '.') {
+    leadingDots++;
+  }
+
+  const String nameSuffix = requestedName.substring(leadingDots);
+  bool suffixHasNameCharacter = false;
+  for (size_t i = 0; i < nameSuffix.length(); ++i) {
+    if (nameSuffix[i] != ' ' && nameSuffix[i] != '.') {
+      suffixHasNameCharacter = true;
+      break;
+    }
+  }
+  if (!suffixHasNameCharacter || leadingDots >= StringUtils::kDefaultMaxFilenameBytes) {
+    server->send(400, "text/plain", "Invalid folder name");
+    return;
+  }
+  const size_t suffixBudget =
+      StringUtils::kDefaultMaxFilenameBytes > leadingDots ? StringUtils::kDefaultMaxFilenameBytes - leadingDots : 0;
+  const String sanitizedSuffix = StringUtils::sanitizeFilename(nameSuffix.c_str(), suffixBudget).c_str();
+  String folderName = requestedName.substring(0, leadingDots);
+  folderName += sanitizedSuffix;
 
   // Validate folder name
   if (folderName.isEmpty() || folderName == "book") {
@@ -1043,12 +1065,19 @@ void CrossPointWebServer::handleCreateFolder() const {
   }
   parent.close();
 
+  if (isProtectedPath(parentPath)) {
+    server->send(403, "text/plain", "Access denied to protected path");
+    return;
+  }
+
   // Build full folder path
   String folderPath = parentPath;
   if (!folderPath.endsWith("/")) folderPath += "/";
   folderPath += folderName;
 
-  if (isProtectedPath(folderPath)) {
+  // Allow creating a new hidden folder in a visible parent. Existing hidden
+  // and system-managed paths remain protected unless Show Hidden Files is on.
+  if (isProtectedPath(folderPath) && !folderName.startsWith(".")) {
     server->send(403, "text/plain", "Access denied to protected path");
     return;
   }
