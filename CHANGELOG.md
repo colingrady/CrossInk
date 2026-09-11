@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Manage Fonts no longer crashes after Wi-Fi connects on ESP32-S3 readers.
+
 ## [v1.5.1] - 2026-09-10
 
 ### Added

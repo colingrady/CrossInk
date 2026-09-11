@@ -1145,11 +1145,10 @@ void setupDisplayAndFonts(const bool seamless, const bool loadReaderResources, c
   renderer.begin();
   display.setInverted(SETTINGS.screenInverted != 0);
   // FreeInkUI headers need more than 4 KB once the render loop and nested
-  // screen builders share the task stack. KOReader Sync and OPDS need the
-  // reader stack on S3 devices because their deferred Wi-Fi transitions can
-  // render a parent screen before the child activity is promoted. Other
-  // lightweight network targets use 8 KB; reader rendering retains its 16 KB
-  // budget.
+  // screen builders share the task stack. Some S3 network flows can render a
+  // parent screen before their deferred Wi-Fi child is promoted, so their
+  // caller selects the reader-sized stack. Lightweight network targets use
+  // 8 KB; reader rendering retains its 16 KB budget.
   activityManager.begin(useReaderRenderStack ? READER_RENDER_TASK_STACK_BYTES : NETWORK_RENDER_TASK_STACK_BYTES);
 
   // Initialize font decompressor for compressed reader fonts
@@ -1232,16 +1231,17 @@ void setup() {
   const bool isNetworkResume = snapshotTarget >= static_cast<uint32_t>(NetworkBootTarget::OTA);
   const bool followsWakeLightPolicy =
       isNetworkResume || (snapshotPayload & SILENT_REBOOT_FOLLOW_LIGHT_WAKE_POLICY) != 0;
-  // KOReader Sync, OPDS, and File Transfer can render their parent screens
-  // while a deferred Wi-Fi child is completing. On S3 devices, keep the
-  // reader-sized render stack without loading the rest of the reader
+  // KOReader Sync, OPDS, File Transfer, and Manage Fonts can render their
+  // parent screens while a deferred Wi-Fi child is completing. On S3 devices,
+  // keep the reader-sized render stack without loading the rest of the reader
   // resources. C3 devices retain the smaller network stack to preserve their
   // tighter internal-RAM budget.
   const bool useReaderRenderStack =
       !isNetworkResume ||
       (FREEINK_MCU_S3 && (snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::KOREADER_SYNC) ||
                           snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::OPDS) ||
-                          snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::FILE_TRANSFER)));
+                          snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::FILE_TRANSFER) ||
+                          snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::MANAGE_FONTS)));
   silentRebootMagic = 0;
   silentRebootTarget = 0;
   silentRebootPayload = 0;
