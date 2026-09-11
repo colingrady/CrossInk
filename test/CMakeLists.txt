@@ -72,6 +72,7 @@ add_subdirectory(touch_reader_preview)
 add_subdirectory(ligature_guard)
 add_subdirectory(chapter_html_slim_parser)
 add_subdirectory(input_release_guard)
+add_subdirectory(release_suppression)
 add_subdirectory(bitmap_resample)
 
 add_subdirectory(pxc_v2)
@@ -82,3 +83,6 @@ add_subdirectory(epub_grayscale)
 add_subdirectory(ui_symbol_fallback)
 
 add_subdirectory(absolute_grayscale)
+
+add_subdirectory(buffered_file)
+add_subdirectory(ota_boot_switch)

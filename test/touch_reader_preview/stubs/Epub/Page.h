@@ -47,7 +47,7 @@ class TextBlock {
   uint16_t wordTextLen(uint16_t index) const { return static_cast<uint16_t>(words[index].text.size()); }
   int16_t wordXpos(uint16_t index) const { return words[index].x; }
   EpdFontFamily::Style wordStyle(uint16_t index) const { return words[index].style; }
-  uint8_t bionicBoundary(uint16_t) const { return 0; }
+  uint8_t focusBoundary(uint16_t) const { return 0; }
   bool wordEndsWithInsertedHyphen(uint16_t index) const { return words[index].endsWithInsertedHyphen; }
   bool wordHasSpaceBefore(uint16_t index) const { return words[index].hasSpaceBefore; }
   uint16_t guideDotXOffset(uint16_t) const { return 0; }

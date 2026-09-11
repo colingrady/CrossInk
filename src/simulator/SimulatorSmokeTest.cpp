@@ -64,6 +64,10 @@ class SimulatorSmokeTest {
     Release,
     HomeTap,
     HomeLongPress,
+    ConfigureHomeButtonPowerLock,
+    WaitForPowerLongPress,
+    AssertHomeButtonDisabled,
+    AssertHomeButtonEnabled,
     AssertTouchscreenDisabled,
     AssertTouchscreenEnabled,
     OpenSmokeBook,
@@ -395,6 +399,22 @@ class SimulatorSmokeTest {
     return {ScriptActionType::HomeLongPress, MappedInputManager::Button::Back, nullptr, 0, 0, 0};
   }
 
+  static ScriptAction configureHomeButtonPowerLock() {
+    return {ScriptActionType::ConfigureHomeButtonPowerLock, MappedInputManager::Button::Power, nullptr, 0, 0, 0};
+  }
+
+  static ScriptAction waitForPowerLongPress() {
+    return {ScriptActionType::WaitForPowerLongPress, MappedInputManager::Button::Power, nullptr, 0, 0, 0};
+  }
+
+  static ScriptAction assertHomeButtonDisabled() {
+    return {ScriptActionType::AssertHomeButtonDisabled, MappedInputManager::Button::Power, nullptr, 0, 0, 0};
+  }
+
+  static ScriptAction assertHomeButtonEnabled() {
+    return {ScriptActionType::AssertHomeButtonEnabled, MappedInputManager::Button::Power, nullptr, 0, 0, 0};
+  }
+
   static ScriptAction assertTouchscreenDisabled() {
     return {ScriptActionType::AssertTouchscreenDisabled, MappedInputManager::Button::Back, nullptr, 0, 0, 0};
   }
@@ -457,6 +477,22 @@ class SimulatorSmokeTest {
         inputScript.push_back(render("Reader after touch page forward", 4));
       }
       if (mappedInputManager.hasHomeKey()) {
+        // Reader long-Power actions fire at the hold threshold. Their release
+        // must not reach main.cpp's global shortcut route and run the same
+        // action again. Repeat the gesture to verify the consumed release does
+        // not leave the next one latched.
+        inputScript.push_back(configureHomeButtonPowerLock());
+        inputScript.push_back(press(MappedInputManager::Button::Power));
+        inputScript.push_back(waitForPowerLongPress());
+        inputScript.push_back(assertHomeButtonDisabled());
+        inputScript.push_back(release(MappedInputManager::Button::Power));
+        inputScript.push_back(assertHomeButtonDisabled());
+        inputScript.push_back(press(MappedInputManager::Button::Power));
+        inputScript.push_back(waitForPowerLongPress());
+        inputScript.push_back(assertHomeButtonEnabled());
+        inputScript.push_back(release(MappedInputManager::Button::Power));
+        inputScript.push_back(assertHomeButtonEnabled());
+
         // X4 Pro reserves the top-edge swipe for its frontlight overlay and
         // moves the reader menu to the bottom edge.
         inputScript.push_back(touchDown(width / 2, 8));
@@ -753,6 +789,22 @@ class SimulatorSmokeTest {
         break;
       case ScriptActionType::HomeLongPress:
         simulatorHomeKeyInput.injectLongPress();
+        break;
+      case ScriptActionType::ConfigureHomeButtonPowerLock:
+        SETTINGS.homeButtonInReaderEnabled = 1;
+        SETTINGS.shortPwrBtn = CrossPointSettings::SHORT_PWRBTN::TOGGLE_HOME_BUTTON_IN_READER;
+        SETTINGS.longPwrBtn = CrossPointSettings::SHORT_PWRBTN::TOGGLE_HOME_BUTTON_IN_READER;
+        break;
+      case ScriptActionType::WaitForPowerLongPress:
+        if (mappedInputManager.getHeldTime() < SETTINGS.getPowerButtonLongPressDuration()) {
+          --scriptIndex;
+        }
+        break;
+      case ScriptActionType::AssertHomeButtonDisabled:
+        if (SETTINGS.homeButtonInReaderEnabled) fail("Long Power did not disable the Home button");
+        break;
+      case ScriptActionType::AssertHomeButtonEnabled:
+        if (!SETTINGS.homeButtonInReaderEnabled) fail("Long Power did not enable the Home button");
         break;
       case ScriptActionType::AssertTouchscreenDisabled:
         if (!SETTINGS.disableReaderTouchscreen) fail("Expected reader touchscreen to be disabled");

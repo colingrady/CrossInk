@@ -1436,6 +1436,8 @@ const DEFAULT_MAX_WIDTH = DEVICE_PROFILES[DEFAULT_DEVICE].width;
 const DEFAULT_MAX_HEIGHT = DEVICE_PROFILES[DEFAULT_DEVICE].height;
 const DEFAULT_JPEG_QUALITY = 85;
 const DEFAULT_ENABLE_GRAYSCALE = true;
+const COVER_MAX_WIDTH = 480;
+const COVER_MAX_HEIGHT = 792;
 const X_DEFAULT_REFERENCE_CHARACTERS_PER_PAGE = 1500;
 // Note: Overlap is now always centered distribution (min 5%)
 
@@ -1454,6 +1456,7 @@ const DEFAULT_UPLOAD_SETTINGS = Object.freeze({
   convertBeforeUpload: false,
   renameFromMetadata: false,
   splitLongSections: true,
+  preserveCoverColor: true,
   quality: DEFAULT_JPEG_QUALITY,
   referenceCharacters: X_DEFAULT_REFERENCE_CHARACTERS_PER_PAGE,
   deviceTarget: "auto",
@@ -1468,6 +1471,7 @@ function getCurrentUploadSettings() {
     convertBeforeUpload: !!document.getElementById("convertBeforeUpload")?.checked,
     renameFromMetadata: !!document.getElementById("renameFromMetadataToggle")?.checked,
     splitLongSections: !!document.getElementById("splitLongSectionsToggle")?.checked,
+    preserveCoverColor: !!document.getElementById("preserveCoverColorToggle")?.checked,
     quality: parseInt(document.getElementById("qualitySlider")?.value || JPEG_QUALITY, 10),
     referenceCharacters: parseInt(
       document.getElementById("referenceCharactersInput")?.value || X_DEFAULT_REFERENCE_CHARACTERS_PER_PAGE,
@@ -1487,6 +1491,7 @@ function applyUploadSettings(settings = {}) {
     document.getElementById("convertBeforeUpload").checked = !!merged.convertBeforeUpload;
     document.getElementById("renameFromMetadataToggle").checked = !!merged.renameFromMetadata;
     document.getElementById("splitLongSectionsToggle").checked = !!merged.splitLongSections;
+    document.getElementById("preserveCoverColorToggle").checked = !!merged.preserveCoverColor;
     document.getElementById("export-log-checkbox").checked = !!merged.exportLog;
     document.getElementById("rememberUploadSettings").checked = !!settings.rememberSettings;
     document.getElementById("referenceCharactersInput").value = normalizedReferenceCharactersPerPage(
@@ -3663,9 +3668,33 @@ function applyGrayscale(ctx, width, height) {
   ctx.putImageData(imageData, 0, 0);
 }
 
+async function findEpubCoverImagePaths(zip) {
+  const opfPath = await findOPFPath(zip);
+  const entry = opfPath && zip.files[opfPath];
+  if (!entry) return new Set();
+  const doc = new DOMParser().parseFromString(await safeReadText(entry), "application/xml");
+  if (doc.getElementsByTagName("parsererror").length) return new Set();
+
+  const coverId = Array.from(doc.getElementsByTagName("meta"))
+    .find((meta) => meta.getAttribute("name") === "cover")
+    ?.getAttribute("content");
+  const items = Array.from(doc.getElementsByTagName("item"));
+  const coverItem = (coverId && items.find((item) => item.getAttribute("id") === coverId)) ||
+    items.find((item) => (item.getAttribute("properties") || "").split(/\s+/).includes("cover-image")) ||
+    items.find((item) => {
+    const properties = item.getAttribute("properties") || "";
+    const id = item.getAttribute("id") || "";
+    const href = item.getAttribute("href") || "";
+    return !properties.includes("cover-image") &&
+      (item.getAttribute("media-type") || "").startsWith("image/") && /cover/i.test(`${id} ${href}`);
+    });
+  const href = coverItem?.getAttribute("href");
+  return href ? new Set([resolvePath(opfPath, decodeHref(href.split("#")[0]))]) : new Set();
+}
+
 // Process single image - returns array of {data, suffix} objects
 const IMAGE_LOAD_TIMEOUT_MS = 30000; // 30 second timeout for image loading
-async function processImage(data, imageState = 0, imagePath = "") {
+async function processImage(data, imageState = 0, imagePath = "", preserveColor = false) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(new Blob([data], { type: imageMimeType(imagePath) }));
     const img = new Image();
@@ -3681,6 +3710,28 @@ async function processImage(data, imageState = 0, imagePath = "") {
       URL.revokeObjectURL(url);
       const origW = img.width,
         origH = img.height;
+
+      if (preserveColor) {
+        const scale = Math.min(1, COVER_MAX_WIDTH / origW, COVER_MAX_HEIGHT / origH);
+        const width = Math.max(1, Math.round(origW * scale));
+        const height = Math.max(1, Math.round(origH * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = "high";
+        context.fillStyle = "#FFF";
+        context.fillRect(0, 0, width, height);
+        context.drawImage(img, 0, 0, width, height);
+        const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", JPEG_QUALITY / 100));
+        const output = await blob.arrayBuffer();
+        resolve({
+          parts: [{ data: output, suffix: "", width, height, size: output.byteLength }],
+          meta: { origW, origH, origSize, wasSplit: false, rotated: false, finalW: width, finalH: height, finalSize: output.byteLength, imageState: 0 },
+        });
+        return;
+      }
 
       // imageState: 0=Normal, 1=H-Split (CW/CCW), 2=V-Split, 3=Rotate & Fit
       // ========================================================================
@@ -4322,22 +4373,26 @@ async function buildCrossInkPxcSidecars(out, zip, xhtmlFiles) {
       const href = resolveCrossInkPxcPath(xhtmlPath, image.getAttribute("src"));
       const imageFile = href && out.file(href);
       if (!imageFile) continue;
-      const data = await imageFile.async("arraybuffer");
-      const bitmap = await createImageBitmap(new Blob([data]));
-      const sourceWidth = bitmap.width;
-      const sourceHeight = bitmap.height;
-      if (bitmap.close) bitmap.close();
-      if (!sourceWidth || !sourceHeight) continue;
-      const size = crossInkPxcSize(sourceWidth, sourceHeight, crossInkPxcStyle(rules, image), viewportWidth, viewportHeight);
-      if (entries.length >= 256 || entries.some((e) => e.href === href) || !crossInkIndexPath(href, 128)) continue;
-      const key = `${href}:${size.width}x${size.height}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const pxcPath = `${CROSSINK_PXC_DIR}/${crossInkPxcPathKey(key)}.pxc2`;
-      const payload = await buildCrossInkPxc(data, size.width, size.height);
-      out.file(pxcPath, payload, { compression: "STORE", createFolders: false });
-      entries.push({ href, pxc: pxcPath, ...size, pxcFormat: "pxc2", pxcBytes: payload.length,
-        pixelCrc32: new DataView(payload.buffer).getUint32(24, true) });
+      try {
+        const data = await imageFile.async("arraybuffer");
+        const bitmap = await createImageBitmap(new Blob([data]));
+        const sourceWidth = bitmap.width;
+        const sourceHeight = bitmap.height;
+        if (bitmap.close) bitmap.close();
+        if (!sourceWidth || !sourceHeight) continue;
+        const size = crossInkPxcSize(sourceWidth, sourceHeight, crossInkPxcStyle(rules, image), viewportWidth, viewportHeight);
+        if (entries.length >= 256 || entries.some((e) => e.href === href) || !crossInkIndexPath(href, 128)) continue;
+        const key = `${href}:${size.width}x${size.height}`;
+        if (seen.has(key)) continue;
+        const pxcPath = `${CROSSINK_PXC_DIR}/${crossInkPxcPathKey(key)}.pxc2`;
+        const payload = await buildCrossInkPxc(data, size.width, size.height);
+        out.file(pxcPath, payload, { compression: "STORE", createFolders: false });
+        seen.add(key);
+        entries.push({ href, pxc: pxcPath, ...size, pxcFormat: "pxc2", pxcBytes: payload.length,
+          pixelCrc32: new DataView(payload.buffer).getUint32(24, true) });
+      } catch (_) {
+        // Sidecars are optional; keep the source EPUB image when a browser cannot decode it.
+      }
     }
   }
   return entries;
@@ -4369,6 +4424,9 @@ async function convertEpubFile(file, progressCallback) {
 
   const out = new JSZip();
   const entries = Object.entries(zip.files);
+  const coverImagePaths = document.getElementById("preserveCoverColorToggle")?.checked
+    ? await findEpubCoverImagePaths(zip)
+    : new Set();
   const splitImages = {};
   const xhtmlFiles = {};
   let processedXhtmlFiles = {};
@@ -4397,7 +4455,7 @@ async function convertEpubFile(file, progressCallback) {
 
       let result;
       try {
-        result = await processImage(data, imageState, path);
+        result = await processImage(data, imageState, path, coverImagePaths.has(path));
       } catch (imageError) {
         // Log error but continue with original image
         console.error(`Failed to process image ${path}:`, imageError);

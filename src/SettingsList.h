@@ -388,8 +388,8 @@ inline uint8_t shortcutRawValue(const ShortcutOptionCatalog catalog, const Cross
           return Chord::CHORD_TOGGLE_FONT;
         case Action::TOGGLE_GUIDE_DOTS:
           return Chord::CHORD_TOGGLE_GUIDE_DOTS;
-        case Action::TOGGLE_BIONIC_READING:
-          return Chord::CHORD_TOGGLE_BIONIC_READING;
+        case Action::TOGGLE_FOCUS_READING:
+          return Chord::CHORD_TOGGLE_FOCUS_READING;
         case Action::CYCLE_PAGE_TURN:
           return Chord::CHORD_CYCLE_PAGE_TURN;
         case Action::SYNC_PROGRESS:
@@ -450,8 +450,8 @@ inline uint8_t shortcutRawValue(const ShortcutOptionCatalog catalog, const Cross
           return LongPress::LONG_MENU_CHANGE_FONT;
         case Action::TOGGLE_GUIDE_DOTS:
           return LongPress::LONG_MENU_TOGGLE_GUIDE_DOTS;
-        case Action::TOGGLE_BIONIC_READING:
-          return LongPress::LONG_MENU_TOGGLE_BIONIC;
+        case Action::TOGGLE_FOCUS_READING:
+          return LongPress::LONG_MENU_TOGGLE_FOCUS;
         case Action::CYCLE_PAGE_TURN:
           return LongPress::LONG_MENU_CYCLE_PAGE_TURN;
         case Action::TOGGLE_TILT_PAGE_TURN:
@@ -670,8 +670,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                             "extraParagraphSpacing", StrId::STR_CAT_READER));
     add(SettingInfo::Toggle(StrId::STR_FORCE_PARAGRAPH_INDENTS, &CrossPointSettings::forceParagraphIndents,
                             "forceParagraphIndents", StrId::STR_CAT_READER));
-    add(SettingInfo::Toggle(StrId::STR_BIONIC_READING, &CrossPointSettings::bionicReadingEnabled,
-                            "bionicReadingEnabled", StrId::STR_CAT_READER));
+    add(SettingInfo::Toggle(StrId::STR_FOCUS_READING, &CrossPointSettings::focusReadingEnabled, "focusReadingEnabled",
+                            StrId::STR_CAT_READER));
     add(SettingInfo::Toggle(StrId::STR_GUIDE_READING, &CrossPointSettings::guideReadingEnabled, "guideReadingEnabled",
                             StrId::STR_CAT_READER));
     add(SettingInfo::Enum(StrId::STR_INDEXING_METHOD, &CrossPointSettings::indexingMethod,
@@ -1087,7 +1087,7 @@ inline std::vector<SettingInfo> buildReaderSettingsParentList(const std::vector<
   addSettingByName(readerSettings, allSettings, StrId::STR_DISABLE_TOUCHSCREEN);
   addSettingByName(readerSettings, allSettings, StrId::STR_EMBEDDED_STYLE);
   addSettingByName(readerSettings, allSettings, StrId::STR_IMAGES);
-  addSettingByName(readerSettings, allSettings, StrId::STR_BIONIC_READING);
+  addSettingByName(readerSettings, allSettings, StrId::STR_FOCUS_READING);
   addSettingByName(readerSettings, allSettings, StrId::STR_GUIDE_READING);
   addSettingByName(readerSettings, allSettings, StrId::STR_DICTIONARY);
   addSettingByName(readerSettings, allSettings, StrId::STR_INDEXING_METHOD);

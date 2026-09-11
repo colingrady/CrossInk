@@ -64,14 +64,14 @@ class TouchReaderPreviewModel {
         word.textOffset = textSize;
         word.x = block->wordXpos(i);
         word.style = block->wordStyle(i);
-        word.bionicBoundary = block->bionicBoundary(i);
+        word.focusBoundary = block->focusBoundary(i);
         word.hasSpaceBefore = block->wordHasSpaceBefore(i);
         std::memcpy(text.data() + textSize, block->wordText(i), textLength);
         textSize += textLength;
         text[textSize++] = '\0';
         if (!word.hasSpaceBefore && i > 0) {
           const Word& previous = words[wordCount - 2];
-          const int attachedX = previous.x + wordAdvance(renderer, fontId, previous, previous.bionicBoundary != 0) +
+          const int attachedX = previous.x + wordAdvance(renderer, fontId, previous, previous.focusBoundary != 0) +
                                 renderer.getKerning(fontId, lastCodepoint(wordText(previous)),
                                                     firstCodepoint(wordText(word)), previous.style);
           // Some blocks do not report every visible word gap. Recover one
@@ -86,7 +86,7 @@ class TouchReaderPreviewModel {
 
   void renderText(const GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset,
                   const int contentWidth, const uint8_t lineHeightPercent, const uint8_t wordSpacing,
-                  const uint8_t paragraphAlignment, const bool bionicReadingEnabled, const bool guideReadingEnabled,
+                  const uint8_t paragraphAlignment, const bool focusReadingEnabled, const bool guideReadingEnabled,
                   const bool foregroundBlack) const {
     if (!valid()) return;
     const int currentLineHeight = std::max(1, (renderer.getLineHeight(fontId) * lineHeightPercent + 50) / 100);
@@ -113,9 +113,9 @@ class TouchReaderPreviewModel {
         const int firstLineIndent = firstPreviewLine ? previewFirstLineIndent(renderer, fontId, line, alignment) : 0;
         const int lineWidthLimit = std::max(1, availableWidth - firstLineIndent);
         const uint16_t lineEnd = reflowLineEnd(renderer, fontId, wordIndex, paragraphWordEnd, lineWidthLimit,
-                                               wordSpacing, bionicReadingEnabled, guideReadingEnabled);
+                                               wordSpacing, focusReadingEnabled, guideReadingEnabled);
         renderReflowedLine(renderer, fontId, wordIndex, lineEnd, y, availableLeft, availableWidth, firstLineIndent,
-                           alignment, lineEnd == paragraphWordEnd, wordSpacing, bionicReadingEnabled,
+                           alignment, lineEnd == paragraphWordEnd, wordSpacing, focusReadingEnabled,
                            guideReadingEnabled, foregroundBlack);
         wordIndex = lineEnd;
         firstPreviewLine = false;
@@ -131,7 +131,10 @@ class TouchReaderPreviewModel {
   }
 
   // Keep the source blocks alive so unchanged settings use the reader's exact
-  // rendering, including justification, ruby, bidi, and bionic run positions.
+  // rendering, including justification, ruby, bidi, and focus run positions.
+  // TextBlock::render writes pixels through the renderer, so this must remain
+  // a mutable reference despite cppcheck not seeing that dependency.
+  // cppcheck-suppress constParameterReference
   void renderSource(GfxRenderer& renderer, const int fontId, const bool foregroundBlack) const {
     if (!valid()) return;
     for (size_t i = 0; i < lineCount; ++i) {
@@ -147,7 +150,7 @@ class TouchReaderPreviewModel {
     uint16_t textOffset = 0;
     int16_t x = 0;
     EpdFontFamily::Style style = EpdFontFamily::REGULAR;
-    uint8_t bionicBoundary = 0;
+    uint8_t focusBoundary = 0;
     bool hasSpaceBefore = false;
   };
 
@@ -201,12 +204,12 @@ class TouchReaderPreviewModel {
 
   uint16_t reflowLineEnd(const GfxRenderer& renderer, const int fontId, const uint16_t firstWord,
                          const uint16_t paragraphWordEnd, const int availableWidth, const uint8_t wordSpacing,
-                         const bool bionicEnabled, const bool guideReadingEnabled) const {
+                         const bool focusEnabled, const bool guideReadingEnabled) const {
     int lineWidth = 0;
     uint16_t wordIndex = firstWord;
     while (wordIndex < paragraphWordEnd) {
       const Word& word = words[wordIndex];
-      int width = wordAdvance(renderer, fontId, word, bionicEnabled);
+      int width = wordAdvance(renderer, fontId, word, focusEnabled);
       if (wordIndex > firstWord) {
         width += wordGap(renderer, fontId, words[wordIndex - 1], word, wordSpacing, guideReadingEnabled);
       }
@@ -220,7 +223,7 @@ class TouchReaderPreviewModel {
   void renderReflowedLine(const GfxRenderer& renderer, const int fontId, const uint16_t firstWord,
                           const uint16_t lineEnd, const int y, const int availableLeft, const int availableWidth,
                           const int firstLineIndent, const CssTextAlign alignment, const bool isLastLine,
-                          const uint8_t wordSpacing, const bool bionicEnabled, const bool guideReadingEnabled,
+                          const uint8_t wordSpacing, const bool focusEnabled, const bool guideReadingEnabled,
                           const bool foregroundBlack) const {
     int lineWidth = 0;
     int spaceCount = 0;
@@ -230,7 +233,7 @@ class TouchReaderPreviewModel {
         lineWidth += wordGap(renderer, fontId, words[wordIndex - 1], word, wordSpacing, guideReadingEnabled);
         spaceCount += word.hasSpaceBefore;
       }
-      lineWidth += wordAdvance(renderer, fontId, word, bionicEnabled);
+      lineWidth += wordAdvance(renderer, fontId, word, focusEnabled);
     }
 
     int targetLeft = availableLeft;
@@ -261,8 +264,8 @@ class TouchReaderPreviewModel {
         }
         wordX += gap + (word.hasSpaceBefore ? justifyExtra : 0);
       }
-      drawWord(renderer, fontId, wordX, y, word, bionicEnabled, foregroundBlack);
-      wordX += wordAdvance(renderer, fontId, word, bionicEnabled);
+      drawWord(renderer, fontId, wordX, y, word, focusEnabled, foregroundBlack);
+      wordX += wordAdvance(renderer, fontId, word, focusEnabled);
     }
   }
 
@@ -270,7 +273,7 @@ class TouchReaderPreviewModel {
     const auto* cursor = reinterpret_cast<const unsigned char*>(value);
     while (true) {
       const uint32_t codepoint = utf8NextCodepoint(&cursor);
-      if (codepoint == 0 || codepoint != 0x00AD) return codepoint;
+      if (codepoint != 0x00AD) return codepoint;
     }
   }
 
@@ -283,7 +286,7 @@ class TouchReaderPreviewModel {
     return utf8NextCodepoint(&cursor);
   }
 
-  static bool isBionicWordCharacter(const uint32_t codepoint) {
+  static bool isFocusWordCharacter(const uint32_t codepoint) {
     if (codepoint < 128) {
       return ((codepoint | 0x20) >= 'a' && (codepoint | 0x20) <= 'z') || codepoint == '\'';
     }
@@ -294,15 +297,15 @@ class TouchReaderPreviewModel {
     return codepoint != 0x02D7 && codepoint != 0xFE63 && codepoint != 0xFF0D;
   }
 
-  uint8_t resolvedBionicBoundary(const Word& word, const bool enabled) const {
+  uint8_t resolvedFocusBoundary(const Word& word, const bool enabled) const {
     if (!enabled || (word.style & EpdFontFamily::BOLD) != 0) return 0;
-    if (word.bionicBoundary != 0) return word.bionicBoundary;
+    if (word.focusBoundary != 0) return word.focusBoundary;
     const char* value = wordText(word);
     const auto* cursor = reinterpret_cast<const unsigned char*>(value);
     size_t characters = 0;
     while (*cursor != '\0') {
       const auto* const start = cursor;
-      if (!isBionicWordCharacter(utf8NextCodepoint(&cursor)) || cursor <= start) break;
+      if (!isFocusWordCharacter(utf8NextCodepoint(&cursor)) || cursor <= start) break;
       ++characters;
     }
     if (characters == 0) return 0;
@@ -313,9 +316,9 @@ class TouchReaderPreviewModel {
     return static_cast<uint8_t>(std::min<size_t>(cursor - reinterpret_cast<const unsigned char*>(value), UINT8_MAX));
   }
 
-  int wordAdvance(const GfxRenderer& renderer, const int fontId, const Word& word, const bool bionicEnabled) const {
+  int wordAdvance(const GfxRenderer& renderer, const int fontId, const Word& word, const bool focusEnabled) const {
     const char* value = wordText(word);
-    const uint8_t boundary = resolvedBionicBoundary(word, bionicEnabled);
+    const uint8_t boundary = resolvedFocusBoundary(word, focusEnabled);
     if (boundary == 0 || boundary >= std::strlen(value)) return renderer.getTextAdvanceX(fontId, value, word.style);
     char prefix[40];
     const size_t length = std::min<size_t>({static_cast<size_t>(boundary), sizeof(prefix) - 1, std::strlen(value)});
@@ -343,9 +346,9 @@ class TouchReaderPreviewModel {
   }
 
   void drawWord(const GfxRenderer& renderer, const int fontId, const int x, const int y, const Word& word,
-                const bool bionicEnabled, const bool foregroundBlack) const {
+                const bool focusEnabled, const bool foregroundBlack) const {
     const char* value = wordText(word);
-    const uint8_t boundary = resolvedBionicBoundary(word, bionicEnabled);
+    const uint8_t boundary = resolvedFocusBoundary(word, focusEnabled);
     if (boundary == 0 || boundary >= std::strlen(value)) {
       renderer.drawText(fontId, x, y, value, foregroundBlack, word.style);
       return;

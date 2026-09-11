@@ -260,7 +260,7 @@ std::array<EpubRenderMode, 3> fallbackModesForSelection(const EpubRenderMode sel
 struct SectionBuildProfile {
   EpubRenderMode renderMode;
   bool embeddedStyle;
-  bool bionicReadingEnabled;
+  bool focusReadingEnabled;
   bool guideReadingEnabled;
   const char* label;
   bool safeMode;
@@ -281,14 +281,14 @@ const char* sectionBuildLabelForRenderMode(const EpubRenderMode renderMode) {
 SectionBuildProfile buildProfileForRenderMode(const EpubRenderMode renderMode) {
   return SectionBuildProfile{renderMode,
                              SETTINGS.embeddedStyle != 0,
-                             SETTINGS.bionicReadingEnabled != 0,
+                             SETTINGS.focusReadingEnabled != 0,
                              SETTINGS.guideReadingEnabled != 0,
                              sectionBuildLabelForRenderMode(renderMode),
                              false};
 }
 
 bool shouldAttemptSafeModeFallback() {
-  return SETTINGS.embeddedStyle != 0 || SETTINGS.bionicReadingEnabled != 0 || SETTINGS.guideReadingEnabled != 0;
+  return SETTINGS.embeddedStyle != 0 || SETTINGS.focusReadingEnabled != 0 || SETTINGS.guideReadingEnabled != 0;
 }
 
 SectionBuildProfile safeModeBuildProfile() {
@@ -346,7 +346,7 @@ ReaderRenderSpec readerRenderSpecForProfile(const int fontId, const uint16_t vie
   ReaderRenderSpec spec = SETTINGS.readerRenderSpec(viewportWidth, viewportHeight, profile.renderMode);
   spec.fontId = fontId;
   spec.embeddedStyle = profile.embeddedStyle;
-  spec.bionicReadingEnabled = profile.bionicReadingEnabled;
+  spec.focusReadingEnabled = profile.focusReadingEnabled;
   spec.guideReadingEnabled = profile.guideReadingEnabled;
   return spec;
 }
@@ -361,7 +361,7 @@ void ensureReaderSdFontLoaded(GfxRenderer& renderer) {
 void applySafeModeReaderSettings() {
   SETTINGS.epubRenderMode = static_cast<uint8_t>(EpubRenderMode::Light);
   SETTINGS.embeddedStyle = 0;
-  SETTINGS.bionicReadingEnabled = 0;
+  SETTINGS.focusReadingEnabled = 0;
   SETTINGS.guideReadingEnabled = 0;
 }
 
@@ -1038,7 +1038,7 @@ void captureReaderSettings(EpubReaderActivity::ReaderSettingsSnapshot& out) {
   out.imageRendering = SETTINGS.imageRendering;
   out.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
   out.forceParagraphIndents = SETTINGS.forceParagraphIndents;
-  out.bionicReadingEnabled = SETTINGS.bionicReadingEnabled;
+  out.focusReadingEnabled = SETTINGS.focusReadingEnabled;
   out.guideReadingEnabled = SETTINGS.guideReadingEnabled;
   out.epubRenderMode = normalizeRenderModeRaw(SETTINGS.epubRenderMode);
   out.indexingMethod = SETTINGS.indexingMethod;
@@ -1078,7 +1078,7 @@ void applyReaderSettings(const EpubReaderActivity::ReaderSettingsSnapshot& in) {
       in.imageRendering < CrossPointSettings::IMAGE_RENDERING_COUNT ? in.imageRendering : SETTINGS.imageRendering;
   SETTINGS.extraParagraphSpacing = in.extraParagraphSpacing ? 1 : 0;
   SETTINGS.forceParagraphIndents = in.forceParagraphIndents ? 1 : 0;
-  SETTINGS.bionicReadingEnabled = in.bionicReadingEnabled ? 1 : 0;
+  SETTINGS.focusReadingEnabled = in.focusReadingEnabled ? 1 : 0;
   SETTINGS.guideReadingEnabled = in.guideReadingEnabled ? 1 : 0;
   SETTINGS.epubRenderMode = normalizeRenderModeRaw(in.epubRenderMode);
   SETTINGS.indexingMethod = in.indexingMethod < CrossPointSettings::INDEXING_METHOD_COUNT
@@ -1112,7 +1112,7 @@ bool readReaderSettingsSnapshot(FsFile& file, EpubReaderActivity::ReaderSettings
         readU8(file, out.embeddedStyle) && readU8(file, out.hyphenationEnabled) && readU8(file, out.textAntiAliasing) &&
         (!includesLegacyReaderDarkMode || readU8(file, discardedLegacyReaderDarkMode)) &&
         readU8(file, out.imageRendering) && readU8(file, out.extraParagraphSpacing) &&
-        readU8(file, out.forceParagraphIndents) && readU8(file, out.bionicReadingEnabled) &&
+        readU8(file, out.forceParagraphIndents) && readU8(file, out.focusReadingEnabled) &&
         readU8(file, out.guideReadingEnabled))) {
     return false;
   }
@@ -1134,7 +1134,7 @@ bool writeReaderSettingsSnapshot(FsFile& file, const EpubReaderActivity::ReaderS
          writeU8(file, in.paragraphAlignment) && writeU8(file, in.embeddedStyle) &&
          writeU8(file, in.hyphenationEnabled) && writeU8(file, in.textAntiAliasing) &&
          writeU8(file, in.imageRendering) && writeU8(file, in.extraParagraphSpacing) &&
-         writeU8(file, in.forceParagraphIndents) && writeU8(file, in.bionicReadingEnabled) &&
+         writeU8(file, in.forceParagraphIndents) && writeU8(file, in.focusReadingEnabled) &&
          writeU8(file, in.guideReadingEnabled) && writeU8(file, normalizeRenderModeRaw(in.epubRenderMode)) &&
          writeU8(file, in.indexingMethod < CrossPointSettings::INDEXING_METHOD_COUNT
                            ? in.indexingMethod
@@ -2264,20 +2264,9 @@ void EpubReaderActivity::onExit() {
   // Leaving mid-footnote loses the in-RAM return stack on deep sleep; persist the
   // pre-footnote position so the book reopens at the link origin, not the footnote.
   if (footnoteDepth > 0 && epub) {
-    const SavedPosition& origin = savedPositions[0];
-    // Record the origin chapter's real page count. A zero reads back as a valid
-    // record with hasPageCount set, which breaks the percent math on reopen.
-    // A preview section describes the note rather than the origin chapter, so its page
-    // count is not usable here; fall back to the last count persisted for that spine.
-    int originPageCount = 0;
-    if (!activeFootnotePreview && section && origin.spineIndex == currentSpineIndex) {
-      originPageCount = section->estimatedTotalPages();
-    } else if (lastSavedSpineIndex == origin.spineIndex) {
-      originPageCount = std::max(0, lastSavedPageCount);
+    if (!saveFootnoteOriginProgress()) {
+      LOG_ERR("ERS", "Failed to save footnote origin on exit");
     }
-    // Forced past the footnote-preview suppression: this origin position is exactly what
-    // that suppression protects, so it is the one save that must go through.
-    saveProgress(origin.spineIndex, origin.pageNumber, originPageCount, /*allowDuringFootnotePreview=*/true);
   }
 
   BOOKMARKS.unload();
@@ -2980,6 +2969,9 @@ void EpubReaderActivity::loop() {
     return;
   }
   if (executeLongPowerButtonAction()) {
+    // Reader long-press actions execute while Power is still held. Consume its
+    // later release so the app-wide shortcut dispatcher cannot run it again.
+    mappedInput.suppressNextPowerRelease();
     return;
   }
 
@@ -3753,17 +3745,15 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::SYNC: {
-      if (activeFootnotePreview) {
-        requestUpdate();
-        break;
-      }
       if (KOREADER_STORE.hasCredentials()) {
         const int currentPage = section ? section->currentPage : nextPageNumber;
         const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
 
         // Persist current position so the reader resumes at the right page on return.
         // goToReader() depends on this file, so abort the sync if the write fails.
-        if (!saveProgress(currentSpineIndex, currentPage, totalPages)) {
+        const bool saved =
+            footnoteDepth > 0 ? saveFootnoteOriginProgress() : saveProgress(currentSpineIndex, currentPage, totalPages);
+        if (!saved) {
           LOG_ERR("KOSync", "Aborting sync because current progress could not be saved");
           pendingSyncSaveError = true;
           requestUpdate();
@@ -3780,6 +3770,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           break;
         }
 
+        if (replacementResume) APP_STATE.setPendingOverlayResume(*replacementResume);
         pauseReadingPaceTimer("sync_progress");
         activityManager.replaceActivity(std::move(restartActivity));
       }
@@ -4051,10 +4042,12 @@ bool EpubReaderActivity::handleFrontlightPanelResult(const FrontlightPanelResult
   resume.selectedIndex = result.state.selectedAction;
   resume.bookPath = epub->getPath();
   if (result.action == FrontlightPanelAction::SyncProgress) {
+    if (!KOREADER_STORE.hasCredentials()) return startGlobalSyncProgress();
     resume.readerOrientation = SETTINGS.orientation;
     resume.preserveReaderOrientation = true;
-    if (KOREADER_STORE.hasCredentials()) APP_STATE.setPendingOverlayResume(resume);
-    return startGlobalSyncProgress();
+    // Use the reader's save-and-handoff path; a direct network restart skips onExit().
+    onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::SYNC, false, &resume);
+    return true;
   }
   if (result.action == FrontlightPanelAction::NearbyPositionSync) {
     onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::NEARBY_POSITION_SYNC, false, &resume);
@@ -4539,8 +4532,8 @@ void EpubReaderActivity::executeReaderQuickAction(CrossPointSettings::LONG_PRESS
       SETTINGS.guideReadingEnabled = !SETTINGS.guideReadingEnabled;
       reindexCurrentSection();
       break;
-    case CrossPointSettings::LONG_MENU_TOGGLE_BIONIC:
-      SETTINGS.bionicReadingEnabled = !SETTINGS.bionicReadingEnabled;
+    case CrossPointSettings::LONG_MENU_TOGGLE_FOCUS:
+      SETTINGS.focusReadingEnabled = !SETTINGS.focusReadingEnabled;
       reindexCurrentSection();
       break;
     case CrossPointSettings::LONG_MENU_TOGGLE_BOOKMARK:
@@ -4659,8 +4652,8 @@ bool EpubReaderActivity::handleShortcutAction(const uint8_t rawAction) {
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_GUIDE_DOTS:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_GUIDE_DOTS);
       return true;
-    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BIONIC_READING:
-      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BIONIC);
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_FOCUS_READING:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_FOCUS);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BOOKMARK:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BOOKMARK);
@@ -4745,8 +4738,8 @@ bool EpubReaderActivity::handleShortcutAction(const CrossPointSettings::SHORT_PW
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_GUIDE_DOTS:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_GUIDE_DOTS);
       return true;
-    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BIONIC_READING:
-      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BIONIC);
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_FOCUS_READING:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_FOCUS);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BOOKMARK:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BOOKMARK);
@@ -4881,8 +4874,8 @@ bool EpubReaderActivity::executeShortPowerButtonAction() {
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_GUIDE_DOTS:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_GUIDE_DOTS);
       return true;
-    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BIONIC_READING:
-      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BIONIC);
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_FOCUS_READING:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_FOCUS);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BOOKMARK:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BOOKMARK);
@@ -4986,8 +4979,8 @@ bool EpubReaderActivity::executeLongPowerButtonAction() {
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_GUIDE_DOTS:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_GUIDE_DOTS);
       return true;
-    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BIONIC_READING:
-      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BIONIC);
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_FOCUS_READING:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_FOCUS);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_BOOKMARK:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_BOOKMARK);
@@ -5030,7 +5023,6 @@ bool EpubReaderActivity::executeLongPowerButtonAction() {
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_TILT_PAGE_TURN);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::TOGGLE_DARK_MODE:
-      mappedInput.suppressNextPowerRelease();
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_TOGGLE_DARK_MODE);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::FOOTNOTES:
@@ -5722,10 +5714,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
           usedRenderMode = profile.renderMode;
           safeModeBuildSucceeded = profile.safeMode;
           LOG_DBG("ERS",
-                  "%s section cache built: spine=%d font=%d mode=%u embedded=%u bionic=%u guide=%u pages=%u free=%u "
+                  "%s section cache built: spine=%d font=%d mode=%u embedded=%u focus=%u guide=%u pages=%u free=%u "
                   "maxAlloc=%u building=%u",
                   profile.label, currentSpineIndex, fontId, static_cast<unsigned>(profile.renderMode),
-                  static_cast<unsigned>(profile.embeddedStyle), static_cast<unsigned>(profile.bionicReadingEnabled),
+                  static_cast<unsigned>(profile.embeddedStyle), static_cast<unsigned>(profile.focusReadingEnabled),
                   static_cast<unsigned>(profile.guideReadingEnabled), section->pageCount, ESP.getFreeHeap(),
                   ESP.getMaxAllocHeap(), section->isBuilding() ? 1U : 0U);
         }
@@ -6514,6 +6506,23 @@ bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
   return saved;
 }
 
+bool EpubReaderActivity::saveFootnoteOriginProgress() {
+  const SavedPosition& origin = savedPositions[0];
+  // Record the origin chapter's real page count. A zero reads back as a valid
+  // record with hasPageCount set, which breaks the percent math on reopen.
+  // A preview section describes the note rather than the origin chapter, so its page
+  // count is not usable here; fall back to the last count persisted for that spine.
+  int originPageCount = 0;
+  if (!activeFootnotePreview && section && origin.spineIndex == currentSpineIndex) {
+    originPageCount = section->estimatedTotalPages();
+  } else if (lastSavedSpineIndex == origin.spineIndex) {
+    originPageCount = std::max(0, lastSavedPageCount);
+  }
+  // Forced past the footnote-preview suppression: this origin position is exactly what
+  // that suppression protects, so it is the one save that must go through.
+  return saveProgress(origin.spineIndex, origin.pageNumber, originPageCount, /*allowDuringFootnotePreview=*/true);
+}
+
 bool EpubReaderActivity::queueProgressSave(const int spineIndex, const int currentPage, const int pageCount,
                                            const bool forceSave) {
   if (activeFootnotePreview) {
@@ -7236,7 +7245,7 @@ void EpubReaderActivity::refreshChapterGroupEstimate(const uint16_t viewportWidt
   mix(SETTINGS.hyphenationEnabled);
   mix(SETTINGS.embeddedStyle);
   mix(SETTINGS.imageRendering);
-  mix(SETTINGS.bionicReadingEnabled);
+  mix(SETTINGS.focusReadingEnabled);
   mix(SETTINGS.guideReadingEnabled);
   mix(SETTINGS.wordSpacing);
   mix(SETTINGS.epubRenderMode);

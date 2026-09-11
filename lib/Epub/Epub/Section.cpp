@@ -198,7 +198,7 @@ bool Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
                                    sizeof(spec.forceParagraphIndents) + sizeof(spec.paragraphAlignment) +
                                    sizeof(spec.viewportWidth) + sizeof(spec.viewportHeight) +
                                    sizeof(spec.hyphenationEnabled) + sizeof(spec.embeddedStyle) +
-                                   sizeof(spec.imageRendering) + sizeof(spec.bionicReadingEnabled) +
+                                   sizeof(spec.imageRendering) + sizeof(spec.focusReadingEnabled) +
                                    sizeof(spec.guideReadingEnabled) + sizeof(spec.wordSpacing) + sizeof(uint8_t) +
                                    sizeof(pageCount) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
                                    sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
@@ -214,7 +214,7 @@ bool Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
          serialization::tryWritePod(file, spec.hyphenationEnabled) &&
          serialization::tryWritePod(file, spec.embeddedStyle) &&
          serialization::tryWritePod(file, spec.imageRendering) &&
-         serialization::tryWritePod(file, spec.bionicReadingEnabled) &&
+         serialization::tryWritePod(file, spec.focusReadingEnabled) &&
          serialization::tryWritePod(file, spec.guideReadingEnabled) &&
          serialization::tryWritePod(file, spec.wordSpacing) &&
          serialization::tryWritePod(file, static_cast<uint8_t>(spec.renderMode)) &&
@@ -278,7 +278,7 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     bool fileHyphenationEnabled;
     bool fileEmbeddedStyle;
     uint8_t fileImageRendering;
-    bool fileBionicReadingEnabled;
+    bool fileFocusReadingEnabled;
     bool fileGuideReadingEnabled;
     uint8_t fileWordSpacing;
     uint8_t fileRenderMode;
@@ -289,7 +289,7 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
         !serialization::tryReadPod(file, fileViewportWidth) || !serialization::tryReadPod(file, fileViewportHeight) ||
         !serialization::tryReadPod(file, fileHyphenationEnabled) ||
         !serialization::tryReadPod(file, fileEmbeddedStyle) || !serialization::tryReadPod(file, fileImageRendering) ||
-        !serialization::tryReadPod(file, fileBionicReadingEnabled) ||
+        !serialization::tryReadPod(file, fileFocusReadingEnabled) ||
         !serialization::tryReadPod(file, fileGuideReadingEnabled) ||
         !serialization::tryReadPod(file, fileWordSpacing) || !serialization::tryReadPod(file, fileRenderMode)) {
       file.close();
@@ -303,7 +303,7 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
         spec.forceParagraphIndents != fileForceParagraphIndents || spec.paragraphAlignment != fileParagraphAlignment ||
         spec.viewportWidth != fileViewportWidth || spec.viewportHeight != fileViewportHeight ||
         spec.hyphenationEnabled != fileHyphenationEnabled || spec.embeddedStyle != fileEmbeddedStyle ||
-        spec.imageRendering != fileImageRendering || spec.bionicReadingEnabled != fileBionicReadingEnabled ||
+        spec.imageRendering != fileImageRendering || spec.focusReadingEnabled != fileFocusReadingEnabled ||
         spec.guideReadingEnabled != fileGuideReadingEnabled || spec.wordSpacing != fileWordSpacing ||
         static_cast<uint8_t>(spec.renderMode) != fileRenderMode) {
       file.close();
@@ -407,7 +407,7 @@ bool Section::createSectionFile(const ReaderRenderSpec& spec, const std::functio
   const bool hyphenationEnabled = spec.hyphenationEnabled;
   const bool embeddedStyle = spec.embeddedStyle;
   const uint8_t imageRendering = spec.imageRendering;
-  const bool bionicReadingEnabled = spec.bionicReadingEnabled;
+  const bool focusReadingEnabled = spec.focusReadingEnabled;
   const bool guideReadingEnabled = spec.guideReadingEnabled;
   const uint8_t wordSpacing = spec.wordSpacing;
   const EpubRenderMode renderMode = spec.renderMode;
@@ -436,14 +436,14 @@ bool Section::createSectionFile(const ReaderRenderSpec& spec, const std::functio
     }
     return true;
   };
-  const bool effectiveBionicReadingEnabled = bionicReadingEnabled;
+  const bool effectiveFocusReadingEnabled = focusReadingEnabled;
   const bool effectiveGuideReadingEnabled = guideReadingEnabled;
   LOG_DBG("SCT",
-          "Create section start: spine=%d mode=%u preview=%u viewport=%ux%u image=%u bionic=%u guide=%u free=%u "
+          "Create section start: spine=%d mode=%u preview=%u viewport=%ux%u image=%u focus=%u guide=%u free=%u "
           "maxAlloc=%u",
           spineIndex, static_cast<unsigned>(renderMode), buildOptions.isPreview() ? 1U : 0U, viewportWidth,
-          viewportHeight, imageRendering, effectiveBionicReadingEnabled, effectiveGuideReadingEnabled,
-          ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+          viewportHeight, imageRendering, effectiveFocusReadingEnabled, effectiveGuideReadingEnabled, ESP.getFreeHeap(),
+          ESP.getMaxAllocHeap());
   MemoryBudget::logEpubHeapPools("section build start");
 
   // Create cache directory if it doesn't exist
@@ -535,7 +535,7 @@ bool Section::createSectionFile(const ReaderRenderSpec& spec, const std::functio
     return false;
   }
   ReaderRenderSpec effectiveSpec = spec;
-  effectiveSpec.bionicReadingEnabled = effectiveBionicReadingEnabled;
+  effectiveSpec.focusReadingEnabled = effectiveFocusReadingEnabled;
   effectiveSpec.guideReadingEnabled = effectiveGuideReadingEnabled;
   if (!writeSectionFileHeader(effectiveSpec)) {
     LOG_ERR("SCT", "Failed to write section header");
@@ -586,7 +586,7 @@ bool Section::createSectionFile(const ReaderRenderSpec& spec, const std::functio
 
   ChapterHtmlSlimParser visitor(
       *epub, parsePath, renderer, fontId, lineCompression, extraParagraphSpacing, forceParagraphIndents,
-      paragraphAlignment, viewportWidth, viewportHeight, hyphenationEnabled, effectiveBionicReadingEnabled,
+      paragraphAlignment, viewportWidth, viewportHeight, hyphenationEnabled, effectiveFocusReadingEnabled,
       effectiveGuideReadingEnabled, wordSpacing,
       [this, &pageIndex, &pageCompletionFailed, layoutAbortedForLowMemory](
           std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex,
@@ -750,7 +750,7 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const SectionBuildOptions
   const bool hyphenationEnabled = spec.hyphenationEnabled;
   const bool embeddedStyle = spec.embeddedStyle;
   const uint8_t imageRendering = spec.imageRendering;
-  const bool bionicReadingEnabled = spec.bionicReadingEnabled;
+  const bool focusReadingEnabled = spec.focusReadingEnabled;
   const bool guideReadingEnabled = spec.guideReadingEnabled;
   const uint8_t wordSpacing = spec.wordSpacing;
   const EpubRenderMode renderMode = spec.renderMode;
@@ -777,10 +777,10 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const SectionBuildOptions
   }
 
   LOG_DBG("SCT",
-          "Start incremental section build: spine=%d mode=%u preview=%u viewport=%ux%u image=%u bionic=%u guide=%u "
+          "Start incremental section build: spine=%d mode=%u preview=%u viewport=%ux%u image=%u focus=%u guide=%u "
           "free=%u maxAlloc=%u",
           spineIndex, static_cast<unsigned>(renderMode), buildOptions.isPreview() ? 1U : 0U, viewportWidth,
-          viewportHeight, imageRendering, bionicReadingEnabled, guideReadingEnabled, ESP.getFreeHeap(),
+          viewportHeight, imageRendering, focusReadingEnabled, guideReadingEnabled, ESP.getFreeHeap(),
           ESP.getMaxAllocHeap());
 
   {
@@ -898,7 +898,7 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const SectionBuildOptions
   BuildContext* ctxPtr = ctx.get();
   ctx->parser = makeUniqueNoThrow<ChapterHtmlSlimParser>(
       *epub, ctxPtr->parsePath, renderer, fontId, lineCompression, extraParagraphSpacing, forceParagraphIndents,
-      paragraphAlignment, viewportWidth, viewportHeight, hyphenationEnabled, bionicReadingEnabled, guideReadingEnabled,
+      paragraphAlignment, viewportWidth, viewportHeight, hyphenationEnabled, focusReadingEnabled, guideReadingEnabled,
       wordSpacing,
       [this, ctxPtr](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex,
                      const uint32_t visibleTextOffset) {
