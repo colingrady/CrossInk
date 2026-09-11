@@ -6,9 +6,16 @@
 
 ### Changed
 
+- Web portal pages reuse browser-cached content after checking for firmware updates.
+
 ### Fixed
 
 - Quick Lock now clears when the device wakes after an automatic sleep timeout.
+- EPUB content marked with the HTML hidden attribute no longer appears in the reader.
+- End-of-book selection remains consistent during concurrent redraws.
+- Image dithering reports low-memory failures instead of aborting during buffer allocation.
+- The debugging monitor plots CrossInk heap and PSRAM logs separately; ZIP failures identify the affected EPUB entry.
+
 - Exiting Calibre Wireless on X4 now returns Home with one clean screen refresh instead of repeated blank flashes.
 - Manage Fonts no longer crashes after Wi-Fi connects on ESP32-S3 readers.
 
