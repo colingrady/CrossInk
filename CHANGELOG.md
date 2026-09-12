@@ -12,6 +12,7 @@
 ### Fixed
 
 - Importing CrossPoint settings preserves tap and swipe modes without carrying over a stale reader touchscreen lock.
+- Saved clippings no longer highlight unrelated single words at page boundaries when matching text after a layout change.
 - Quick Lock sleep now respects the configured short Power-button wake behavior.
 - Quick Lock now clears when the device wakes after an automatic sleep timeout.
 - EPUB content marked with the HTML hidden attribute no longer appears in the reader.
