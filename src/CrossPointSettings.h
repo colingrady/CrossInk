@@ -700,7 +700,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   bool loadFromFile();
   static const char* getFilePath() { return "/.crosspoint/crossink-settings.json"; }
   void toJson(JsonDocument& doc) const;
-  bool fromJson(JsonVariantConst doc);
+  bool fromJson(JsonVariantConst doc, bool importingCrossPoint = false);
 
   struct StatusBarSpec {
     bool showChapterPageCount = false;
