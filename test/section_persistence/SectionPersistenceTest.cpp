@@ -16,8 +16,10 @@
 #include <GfxRenderer.h>
 
 namespace {
-constexpr uint8_t kFullVersion = 66;
-constexpr uint8_t kPartialVersion = 0xF6;
+constexpr uint8_t kFullVersion = 76;
+constexpr uint8_t kPartialVersion = 0xF5;
+constexpr uint8_t kPreviousFullVersion = 75;
+constexpr uint8_t kPreviousPartialVersion = 0xF4;
 
 ReaderRenderSpec renderSpec() {
   ReaderRenderSpec spec;
@@ -147,5 +149,19 @@ TEST_F(SectionPersistenceTest, FailedCommitKeepsThePreviousReadableCache) {
   ASSERT_TRUE(Storage.exists(replacement.section.filePath.c_str()));
   EXPECT_EQ(Storage.bytes(replacement.section.filePath), previous);
   replacement.section.build_.reset();
+}
+
+TEST_F(SectionPersistenceTest, RejectsCachesFromPreviousLayoutRevisions) {
+  for (const uint8_t staleVersion : {kPreviousFullVersion, kPreviousPartialVersion}) {
+    SectionHarness harness;
+    harness.begin();
+    harness.appendPages(1);
+    ASSERT_TRUE(harness.commit(staleVersion, 12345, 67890));
+    harness.finishSuccessfulCommit();
+
+    Section reopened(harness.epub, 0, harness.renderer);
+    EXPECT_FALSE(reopened.loadSectionFile(harness.spec));
+    EXPECT_FALSE(Storage.exists(harness.section.filePath.c_str()));
+  }
 }
 }  // namespace
