@@ -16,10 +16,10 @@
 #include <GfxRenderer.h>
 
 namespace {
-constexpr uint8_t kFullVersion = 76;
-constexpr uint8_t kPartialVersion = 0xF5;
-constexpr uint8_t kPreviousFullVersion = 75;
-constexpr uint8_t kPreviousPartialVersion = 0xF4;
+constexpr uint8_t kFullVersion = 78;
+constexpr uint8_t kPartialVersion = 0xF2;
+constexpr uint8_t kPreviousFullVersion = 77;
+constexpr uint8_t kPreviousPartialVersion = 0xF3;
 
 ReaderRenderSpec renderSpec() {
   ReaderRenderSpec spec;
@@ -46,8 +46,8 @@ struct SectionHarness {
         epub, context->parsePath, renderer, spec.fontId, spec.lineCompression, spec.extraParagraphSpacing,
         spec.forceParagraphIndents, spec.paragraphAlignment, spec.viewportWidth, spec.viewportHeight,
         spec.hyphenationEnabled, spec.focusReadingEnabled, spec.guideReadingEnabled, spec.wordSpacing,
-        [](std::unique_ptr<Page>, uint16_t, uint16_t, uint32_t) {}, spec.embeddedStyle, "", "", spec.imageRendering,
-        std::vector<std::string>{}, nullptr, nullptr, spec.renderMode);
+        [](std::unique_ptr<Page>, uint16_t, uint16_t, uint32_t, uint32_t) {}, spec.embeddedStyle, "", "",
+        spec.imageRendering, std::vector<std::string>{}, nullptr, nullptr, spec.renderMode);
     ASSERT_NE(context->parser, nullptr);
     context->parser->anchorData = anchors;
     section.build_ = std::move(context);

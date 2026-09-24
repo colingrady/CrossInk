@@ -22,10 +22,6 @@
 #include <string>
 #include <vector>
 
-#if defined(CROSSINK_ISSUE_666_MEMORY_DIAGNOSTICS) && defined(ARDUINO_ARCH_ESP32) && !defined(SIMULATOR)
-#include <esp_memory_utils.h>
-#endif
-
 #include "../reader/BookReadingStats.h"
 #include "../reader/BookStatsActivity.h"
 #include "../reader/EpubReaderUtils.h"
@@ -50,7 +46,7 @@ namespace {
 constexpr uint32_t CAROUSEL_CACHE_MAGIC = 0x43434152;  // "CCAR"
 // Cached frames include all Home visuals, including the menu icons. Bump this
 // whenever their rendering changes so stale snapshots are rebuilt after OTA.
-constexpr uint16_t CAROUSEL_CACHE_VERSION = 5;
+constexpr uint16_t CAROUSEL_CACHE_VERSION = 7;
 constexpr char CAROUSEL_CACHE_PATH[] = "/.crosspoint/home_carousel_cache.bin";
 constexpr char CAROUSEL_CACHE_TMP_PATH[] = "/.crosspoint/home_carousel_cache.tmp";
 constexpr uint32_t CAROUSEL_FRAME_MIN_FREE_AFTER_ALLOC = 64U * 1024U;
@@ -61,7 +57,7 @@ constexpr int HOME_BOOK_SWAP_RECENT_COUNT = 2;
 enum class HomeMenuAction {
   BrowseFiles,
   ContinueReading,
-  RecentBooks,
+  Library,
   OpdsBrowser,
   ReadingStats,
   Bookmarks,
@@ -131,35 +127,6 @@ bool hasHeapForCarouselFrameCache() {
   return ESP.getFreeHeap() >= CAROUSEL_FRAME_MIN_FREE_AFTER_ALLOC &&
          ESP.getMaxAllocHeap() >= CAROUSEL_FRAME_MIN_MAX_ALLOC_AFTER_ALLOC;
 }
-
-#if defined(CROSSINK_ISSUE_666_MEMORY_DIAGNOSTICS) && defined(ARDUINO_ARCH_ESP32) && !defined(SIMULATOR)
-const char* carouselPointerPool(const void* ptr) {
-  if (!ptr) return "null";
-  if (esp_ptr_external_ram(ptr)) return "PSRAM";
-  if (esp_ptr_internal(ptr)) return "internal";
-  return "other";
-}
-
-// Temporary #666 probe: cache frames are full-screen buffers, so stack/static
-// storage is unsuitable. Check their containing heap regions only at cache
-// setup/copy time. A healthy region does not prove that an individual pointer
-// still owns a live allocation; the owner/alias check below covers that case.
-bool logCarouselMemoryDiagnostic(const char* stage, const int slotIdx, const void* source, const void* destination,
-                                 const size_t byteCount) {
-  const auto internal = MemoryBudget::snapshot();
-  const auto psram = MemoryBudget::psramSnapshot();
-  const bool sourceRegionIntact = source && heap_caps_check_integrity_addr(reinterpret_cast<intptr_t>(source), true);
-  const bool destinationRegionIntact =
-      destination && heap_caps_check_integrity_addr(reinterpret_cast<intptr_t>(destination), true);
-  LOG_INF("DIAG666",
-          "%s slot=%d bytes=%u task=%s src=%p(%s region=%d) dst=%p(%s region=%d); internal free=%u max=%u; "
-          "psram free=%u max=%u",
-          stage, slotIdx, static_cast<unsigned>(byteCount), pcTaskGetName(nullptr), source, carouselPointerPool(source),
-          sourceRegionIntact, destination, carouselPointerPool(destination), destinationRegionIntact, internal.freeHeap,
-          internal.maxAllocHeap, psram.freeHeap, psram.maxAllocHeap);
-  return sourceRegionIntact && destinationRegionIntact;
-}
-#endif
 
 void appendHashedFileStateToKey(std::string& key, const std::string& path) {
   FsFile file;
@@ -299,10 +266,10 @@ const char* savedItemsLabel(bool hasBookmarks, bool hasClippings) {
 void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks,
                          bool hasClippings) {
   items.push({tr(STR_BROWSE_FILES), Folder, HomeMenuAction::BrowseFiles});
-  items.push({tr(STR_MENU_RECENT_BOOKS), Recent, HomeMenuAction::RecentBooks});
+  items.push({tr(STR_LIBRARY), Library, HomeMenuAction::Library});
 
   if (hasOpdsServers) {
-    items.push({tr(STR_OPDS_BROWSER), Library, HomeMenuAction::OpdsBrowser});
+    items.push({tr(STR_OPDS_BROWSER), Opds, HomeMenuAction::OpdsBrowser});
   }
   if (hasReadingStats) {
     items.push({tr(STR_READING_STATS), Chart, HomeMenuAction::ReadingStats});
@@ -323,10 +290,10 @@ HomeMenuEntries buildHomeMenuItems(bool hasOpdsServers, bool hasReadingStats, bo
 
 HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks, bool hasClippings) {
   HomeMenuEntries items;
-  items.push({tr(STR_MENU_RECENT_BOOKS), Recent, HomeMenuAction::RecentBooks});
+  items.push({tr(STR_LIBRARY), Library, HomeMenuAction::Library});
 
   if (hasOpdsServers) {
-    items.push({tr(STR_OPDS_BROWSER), Library, HomeMenuAction::OpdsBrowser});
+    items.push({tr(STR_OPDS_BROWSER), Opds, HomeMenuAction::OpdsBrowser});
   }
   if (hasBookmarks || hasClippings) {
     items.push({savedItemsLabel(hasBookmarks, hasClippings), BookmarkIcon, HomeMenuAction::Bookmarks});
@@ -353,8 +320,8 @@ HomeMenuAction homeActionForInitialMenuItem(HomeMenuItem item) {
   switch (item) {
     case HomeMenuItem::FILE_BROWSER:
       return HomeMenuAction::BrowseFiles;
-    case HomeMenuItem::RECENTS:
-      return HomeMenuAction::RecentBooks;
+    case HomeMenuItem::LIBRARY:
+      return HomeMenuAction::Library;
     case HomeMenuItem::OPDS_BROWSER:
       return HomeMenuAction::OpdsBrowser;
     case HomeMenuItem::FILE_TRANSFER:
@@ -637,7 +604,7 @@ static_assert(HomeActivity::kMaxCachedBooks >= LyraCarouselMetrics::values.homeR
 
 int HomeActivity::getMenuItemCount() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  int count = 4;  // File Browser, Recents, File transfer, Settings
+  int count = 4;  // File Browser, Library, File transfer, Settings
   if (!metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
     count += getVisibleRecentBookCount();
   } else if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
@@ -1213,10 +1180,6 @@ bool HomeActivity::allocateCarouselFrameSlots(int targetFrameCount) {
       gCarouselCache.frameStorage[i] = std::move(frame);
       gCarouselCache.frames[i] = gCarouselCache.frameStorage[i].get();
       gCarouselCache.frameBookIdx[i] = -1;
-#if defined(CROSSINK_ISSUE_666_MEMORY_DIAGNOSTICS) && defined(ARDUINO_ARCH_ESP32) && !defined(SIMULATOR)
-      logCarouselMemoryDiagnostic("frame-allocated", i, renderer.getFrameBuffer(), gCarouselCache.frames[i],
-                                  bufferSize);
-#endif
     }
 
     if (!allocFailed) {
@@ -1598,8 +1561,8 @@ void HomeActivity::loop() {
           case HomeMenuAction::BrowseFiles:
             onFileBrowserOpen();
             break;
-          case HomeMenuAction::RecentBooks:
-            onRecentsOpen();
+          case HomeMenuAction::Library:
+            onLibraryOpen();
             break;
           case HomeMenuAction::OpdsBrowser:
             onOpdsBrowserOpen();
@@ -1843,8 +1806,8 @@ void HomeActivity::loop() {
       case HomeMenuAction::ContinueReading:
         onContinueReading();
         break;
-      case HomeMenuAction::RecentBooks:
-        onRecentsOpen();
+      case HomeMenuAction::Library:
+        onLibraryOpen();
         break;
       case HomeMenuAction::OpdsBrowser:
         onOpdsBrowserOpen();
@@ -2360,22 +2323,8 @@ void HomeActivity::renderCarouselFrame(int bookIdx, int slotIdx) {
   }
   uint8_t* frameBuffer = renderer.getFrameBuffer();
   if (!frameBuffer || !gCarouselCache.frames[slotIdx]) return;
-#if defined(CROSSINK_ISSUE_666_MEMORY_DIAGNOSTICS) && defined(ARDUINO_ARCH_ESP32) && !defined(SIMULATOR)
-  const uint8_t* const ownedFrame = gCarouselCache.frameStorage[slotIdx].get();
-  if (ownedFrame != gCarouselCache.frames[slotIdx]) {
-    LOG_ERR("DIAG666", "pre-copy slot=%d cache alias=%p owner=%p", slotIdx, gCarouselCache.frames[slotIdx], ownedFrame);
-    return;
-  }
-#endif
   renderCarouselFrameToCurrentBuffer(bookIdx, nullptr, nullptr, nullptr);
 
-#if defined(CROSSINK_ISSUE_666_MEMORY_DIAGNOSTICS) && defined(ARDUINO_ARCH_ESP32) && !defined(SIMULATOR)
-  if (!logCarouselMemoryDiagnostic("pre-copy", slotIdx, frameBuffer, gCarouselCache.frames[slotIdx],
-                                   renderer.getBufferSize())) {
-    LOG_ERR("DIAG666", "pre-copy heap integrity failed; skipping carousel frame copy");
-    return;
-  }
-#endif
   memcpy(gCarouselCache.frames[slotIdx], frameBuffer, renderer.getBufferSize());
   gCarouselCache.frameBookIdx[slotIdx] = bookIdx;
   carouselFrames[slotIdx] = gCarouselCache.frames[slotIdx];
@@ -2416,7 +2365,7 @@ void HomeActivity::onContinueReading() {
   }
 }
 
-void HomeActivity::onRecentsOpen() { activityManager.goToRecentBooks(); }
+void HomeActivity::onLibraryOpen() { activityManager.goToLibrary(); }
 
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 

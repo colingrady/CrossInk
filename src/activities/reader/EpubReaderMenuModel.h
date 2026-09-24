@@ -8,6 +8,7 @@ enum class EpubReaderMenuAction : uint8_t {
   SELECT_CHAPTER,
   FOOTNOTES,
   GO_TO_PERCENT,
+  GO_TO_STABLE_PAGE,
   AUTO_PAGE_TURN,
   ROTATE_SCREEN,
   SCREENSHOT,
@@ -32,6 +33,7 @@ enum class EpubReaderMenuAction : uint8_t {
   LOOKUP_HISTORY,
   SET_BOOK_DICTIONARY,
   STATUS_BAR_SETTINGS,
+  RESET_BOOK_READER_SETTINGS,
 };
 
 enum class ReaderDrawerTab : uint8_t { Font = 0, Layout = 1, More = 2, Location = 3, Settings = 4, Count };
@@ -48,6 +50,7 @@ enum class ReaderDrawerPane : uint8_t {
   Margins,
   Chapters,
   Percent,
+  StablePage,
   AutoPageTurn,
   Dictionary,
   DictionaryFont,
@@ -72,6 +75,7 @@ enum class ReaderDrawerCatalogItem : uint8_t {
   Images,
   SelectChapter,
   GoToPercent,
+  GoToStablePage,
   BookmarkToggle,
   ViewBookmarks,
   Screenshot,
@@ -96,6 +100,7 @@ enum class ReaderDrawerCatalogItem : uint8_t {
   FontSize,
   DictionaryFontFamily,
   DictionaryFontSize,
+  ResetBookReaderSettings,
 };
 
 struct ReaderDrawerAvailability {
@@ -104,6 +109,7 @@ struct ReaderDrawerAvailability {
   bool hasBookmarks = false;
   bool hasClippings = false;
   bool showReadingPaceReset = false;
+  bool hasStablePageNumbers = false;
 };
 
 struct ReaderDrawerTabCatalog {
@@ -143,6 +149,7 @@ constexpr ReaderDrawerCatalog makeReaderDrawerCatalog(const ReaderDrawerAvailabi
   }
   more.add(ReaderDrawerCatalogItem::SelectChapter);
   more.add(ReaderDrawerCatalogItem::GoToPercent);
+  if (available.hasStablePageNumbers) more.add(ReaderDrawerCatalogItem::GoToStablePage);
   more.add(ReaderDrawerCatalogItem::AutoPageTurn);
   if (available.hasFootnotes) more.add(ReaderDrawerCatalogItem::Footnotes);
 
@@ -167,6 +174,7 @@ constexpr ReaderDrawerCatalog makeReaderDrawerCatalog(const ReaderDrawerAvailabi
   if (available.showReadingPaceReset) settings.add(ReaderDrawerCatalogItem::ResetReadingPace);
   settings.add(ReaderDrawerCatalogItem::DeleteCache);
   settings.add(ReaderDrawerCatalogItem::DeleteStats);
+  settings.add(ReaderDrawerCatalogItem::ResetBookReaderSettings);
   return catalog;
 }
 
@@ -183,10 +191,17 @@ constexpr bool readerDrawerSliderPreviewsText(const ReaderDrawerPane pane) {
   return pane == ReaderDrawerPane::Spacing || pane == ReaderDrawerPane::Margins;
 }
 
-// These are the only panes that place two annotated sliders in one drawer.
-// Keep their extra landscape height separate from the compact list panes.
+constexpr bool shouldRenderReaderDrawerAntiAliasing(const bool previewRendered, const bool textAntiAliasing,
+                                                    const bool foregroundBlack) {
+  return previewRendered && textAntiAliasing && foregroundBlack;
+}
+
+// Panes with more vertical content than a single control row: Spacing/Margins place
+// two annotated sliders, and Percent/StablePage place a 4-row numeric keypad. Keep
+// their extra landscape height separate from the compact list panes.
 constexpr bool readerDrawerNeedsTallLandscapeSheet(const ReaderDrawerPane pane) {
-  return readerDrawerSliderPreviewsText(pane);
+  return readerDrawerSliderPreviewsText(pane) || pane == ReaderDrawerPane::Percent ||
+         pane == ReaderDrawerPane::StablePage;
 }
 
 constexpr bool isReaderDrawerRowFocused(const bool buttonFocusActive, const int16_t selectedIndex,

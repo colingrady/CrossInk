@@ -214,8 +214,14 @@ std::string formatSettingValue(const SettingInfo& setting) {
   return std::to_string(SETTINGS.*(setting.valuePtr));
 }
 
-fui::BitmapRef twoFingerSwipeIcon(const StrId nameId) {
+fui::BitmapRef swipeActionIcon(const StrId nameId) {
   switch (nameId) {
+    case StrId::STR_LEFT_EDGE_UP:
+    case StrId::STR_RIGHT_EDGE_UP:
+      return fui::bitmapFromIcon(icon_arrow_up_24);
+    case StrId::STR_LEFT_EDGE_DOWN:
+    case StrId::STR_RIGHT_EDGE_DOWN:
+      return fui::bitmapFromIcon(icon_arrow_down_24);
     case StrId::STR_TWO_FINGER_SWIPE_UP:
       return fui::bitmapFromIcon(icon_arrows_up_24);
     case StrId::STR_TWO_FINGER_SWIPE_DOWN:
@@ -281,6 +287,7 @@ void SettingsActivity::rebuildSettingsLists() {
   controlsSideButtonSettings.clear();
   controlsTapsGesturesSettings.clear();
   controlsTwoFingerSwipeSettings.clear();
+  controlsEdgeGestureSettings.clear();
   systemSettings.clear();
   systemDeviceSettings.clear();
   systemFilesCacheSettings.clear();
@@ -297,10 +304,11 @@ void SettingsActivity::rebuildSettingsLists() {
 
   // Pick up any fonts uploaded/deleted over the web server since the last
   // reader activity ran — otherwise the font-family picker shows stale list.
-  sdFontSystem.refreshIfDirty();
+  const bool needsFonts = activeSubmenu == SettingAction::ReaderFontOptions;
+  if (needsFonts) sdFontSystem.refreshIfDirty();
 
   dictionaryRegistry.refreshIfDirty();
-  const auto allSettings = getSettingsList(&sdFontSystem.registry(), &dictionaryRegistry);
+  const auto allSettings = getSettingsList(needsFonts ? &sdFontSystem.registry() : nullptr, &dictionaryRegistry);
   displaySettings = buildGroupedDisplaySettingsList(allSettings);
 #ifndef SIMULATOR
   if (BoardConfig::isX4Pro() || CROSSINK_APP_DEVICE_X4CLASSIC) {
@@ -326,6 +334,9 @@ void SettingsActivity::rebuildSettingsLists() {
   controlsHomeButtonSettings = buildControlsHomeButtonSettingsList(allSettings);
   controlsTapsGesturesSettings = buildControlsTapsGesturesSettingsList(allSettings);
   controlsTwoFingerSwipeSettings = buildControlsTwoFingerSwipeSettingsList(allSettings);
+  controlsEdgeGestureSettings = buildControlsEdgeGestureSettingsList(allSettings);
+  const size_t expectedSideButtonCount =
+      controlsSideButtonBaseCount + (hasSideButtonChordSetting(allSettings) ? 1u : 0u);
 #if CROSSINK_APP_CAP_TOUCH
   if (!gpio.hasTouch()) {
     controlsFrontButtonSettings = buildControlsFrontButtonSettingsList(allSettings);
@@ -339,7 +350,6 @@ void SettingsActivity::rebuildSettingsLists() {
                                        (hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN_DIRECTION) ? 1u : 0u) +
                                        (hasSettingByName(allSettings, StrId::STR_NEXT_PAGE) ? 1u : 0u);
   const size_t expectedFrontButtonCount = hasTouch ? 0u : controlsFrontButtonCount;
-  const size_t expectedSideButtonCount = controlsSideButtonBaseCount + (hasTouch ? 1u : 0u);
 #else
   controlsFrontButtonSettings = buildControlsFrontButtonSettingsList(allSettings);
   controlsSideButtonSettings = buildControlsSideButtonSettingsList(allSettings);
@@ -349,7 +359,6 @@ void SettingsActivity::rebuildSettingsLists() {
                                        (hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN_DIRECTION) ? 1u : 0u) +
                                        (hasSettingByName(allSettings, StrId::STR_NEXT_PAGE) ? 1u : 0u);
   constexpr size_t expectedFrontButtonCount = controlsFrontButtonCount;
-  constexpr size_t expectedSideButtonCount = controlsSideButtonBaseCount;
 #endif
   if (controlsSettings.size() != expectedControlsCount ||
       (gpio.hasHomeKey() && controlsHomeButtonSettings.size() != controlsHomeButtonCount) ||
@@ -420,6 +429,9 @@ void SettingsActivity::setCurrentSettingsForCategory() {
         case SettingAction::ControlsTwoFingerSwipe:
           currentSettings = &controlsTwoFingerSwipeSettings;
           break;
+        case SettingAction::ControlsEdgeGestures:
+          currentSettings = &controlsEdgeGestureSettings;
+          break;
         default:
           currentSettings = &controlsSettings;
           break;
@@ -480,6 +492,8 @@ StrId SettingsActivity::activeSubmenuTitleId() const {
       return StrId::STR_TAPS_AND_GESTURES;
     case SettingAction::ControlsTwoFingerSwipe:
       return StrId::STR_TWO_FINGER_SWIPE;
+    case SettingAction::ControlsEdgeGestures:
+      return StrId::STR_EDGE_GESTURES;
     case SettingAction::SystemDevice:
       return StrId::STR_SYSTEM_DEVICE;
     case SettingAction::SystemFilesCache:
@@ -496,6 +510,7 @@ StrId SettingsActivity::activeSubmenuTitleId() const {
 void SettingsActivity::openSubmenu(SettingAction action) {
   parentSubmenu = activeSubmenu;
   activeSubmenu = action;
+  if (action == SettingAction::ReaderFontOptions) rebuildSettingsLists();
   setCurrentSettingsForCategory();
   selectedSettingIndex = 1;
   showSettingSelection = true;
@@ -611,7 +626,7 @@ void SettingsActivity::openWordSpacingPicker() {
 }
 
 void SettingsActivity::openLanguagePicker() {
-  const int languageCount = static_cast<int>(getLanguageCount());
+  const int languageCount = static_cast<int>(sizeof(SORTED_LANGUAGE_INDICES) / sizeof(SORTED_LANGUAGE_INDICES[0]));
 
   std::vector<std::string> options;
   options.reserve(languageCount);
@@ -626,7 +641,7 @@ void SettingsActivity::openLanguagePicker() {
   int currentIndex = (it != end) ? static_cast<int>(std::distance(begin, it)) : 0;
 
   optionPopup.show(StrId::STR_LANGUAGE, options, currentIndex, [this](int selectedIndex) {
-    const int languageCount = static_cast<int>(getLanguageCount());
+    const int languageCount = static_cast<int>(sizeof(SORTED_LANGUAGE_INDICES) / sizeof(SORTED_LANGUAGE_INDICES[0]));
     if (selectedIndex < 0 || selectedIndex >= languageCount) {
       requestUpdate();
       return;
@@ -1127,6 +1142,7 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::ControlsSideButtons:
       case SettingAction::ControlsTapsGestures:
       case SettingAction::ControlsTwoFingerSwipe:
+      case SettingAction::ControlsEdgeGestures:
       case SettingAction::SystemDevice:
       case SettingAction::SystemFilesCache:
       case SettingAction::SystemReadingStats:
@@ -1447,7 +1463,7 @@ void SettingsActivity::buildSettingsScreen(UiApp::ScreenType& screen) {
     values[i] = settingValueText(settings[i]);
     const bool isSectionHeader = settings[i].type == SettingType::SECTION_HEADER;
     fui::ListItem item;
-    const fui::BitmapRef directionIcon = twoFingerSwipeIcon(settings[i].nameId);
+    const fui::BitmapRef directionIcon = swipeActionIcon(settings[i].nameId);
     const fui::BitmapRef endpointIcon = frontlightScheduleEndpointIcon(settings[i]);
     const fui::BitmapRef itemIcon = directionIcon ? directionIcon : endpointIcon;
     item.label = isSectionHeader ? uiListSectionHeaderLabel(values[i], I18N.get(settings[i].nameId))

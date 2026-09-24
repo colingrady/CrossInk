@@ -37,6 +37,7 @@ namespace {
 constexpr uint8_t SETTINGS_FILE_VERSION = 2;
 constexpr char SETTINGS_FILE_BIN[] = "/.crosspoint/settings.bin";
 constexpr char SETTINGS_FILE_JSON[] = "/.crosspoint/crossink-settings.json";
+constexpr char SETTINGS_FILE_JSON_BAK[] = "/.crosspoint/crossink-settings.json.bak";
 constexpr char LEGACY_SETTINGS_FILE_JSON[] = "/.crosspoint/settings.json";
 constexpr char SETTINGS_FILE_BAK[] = "/.crosspoint/settings.bin.bak";
 constexpr char LANG_FILE_BIN[] = "/.crosspoint/language.bin";
@@ -243,6 +244,9 @@ uint8_t migrateTiltDirectionValue(const uint8_t direction) {
 }  // namespace
 
 const char* CrossPointSettings::getDefaultDeviceName() {
+#if (defined(FREEINK_DEVICE_X4CLASSIC) && FREEINK_DEVICE_X4CLASSIC) || defined(SIMULATOR_DEVICE_X4_CLASSIC)
+  return "X4 Classic";
+#endif
   if (BoardConfig::isSticky()) return "Sticky";
   if (BoardConfig::isX4Pro()) return "CrossInk X4 Pro";
   if (gpio.deviceIsX3()) return "CrossInk X3";
@@ -456,6 +460,15 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
     }
   }
 
+  // Library-local choices stay out of the resident settings catalog and Web Settings.
+  doc["librarySortMethod"] = librarySortMethod;
+  doc["librarySortDescending"] = librarySortDescending;
+  doc["libraryListExpanded"] = libraryListExpanded;
+  doc["libraryShowEpub"] = libraryShowEpub;
+  doc["libraryShowXtc"] = libraryShowXtc;
+  doc["libraryShowTxt"] = libraryShowTxt;
+  doc["libraryShowMarkdown"] = libraryShowMarkdown;
+
   doc["frontButtonBack"] = frontButtonBack;
   doc["frontButtonConfirm"] = frontButtonConfirm;
   doc["frontButtonLeft"] = frontButtonLeft;
@@ -586,6 +599,22 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
     this->*(info.valuePtr) = value;
   }
 
+  const auto readLibraryChoice = [&](const char* key, uint8_t& choice, const int optionCount) {
+    const int stored = doc[key] | static_cast<int>(choice);
+    if (stored < 0 || stored >= optionCount) {
+      needsResave = true;
+      return;
+    }
+    choice = static_cast<uint8_t>(stored);
+  };
+  readLibraryChoice("librarySortMethod", librarySortMethod, 5);
+  readLibraryChoice("librarySortDescending", librarySortDescending, 2);
+  readLibraryChoice("libraryListExpanded", libraryListExpanded, 2);
+  readLibraryChoice("libraryShowEpub", libraryShowEpub, 2);
+  readLibraryChoice("libraryShowXtc", libraryShowXtc, 2);
+  readLibraryChoice("libraryShowTxt", libraryShowTxt, 2);
+  readLibraryChoice("libraryShowMarkdown", libraryShowMarkdown, 2);
+
   // Only the generic-file fallback imports CrossPoint's combined touch mode.
   // Explicit CrossInk gesture keys identify a CrossInk document, even at the old path.
   if (importingCrossPoint && doc["pageTurnGesture"].isNull() && doc["previousPageGesture"].isNull()) {
@@ -628,6 +657,13 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
   normalizeFrontlightScheduleTime(frontlightScheduleEnd);
 
   if (normalizeTwoFingerSwipeActions(*this)) needsResave = true;
+  for (const auto field : {&CrossPointSettings::leftEdgeUp, &CrossPointSettings::leftEdgeDown,
+                           &CrossPointSettings::rightEdgeUp, &CrossPointSettings::rightEdgeDown}) {
+    if (!isTwoFingerSwipeActionAvailable(this->*field, Frontlight.present(), Frontlight.hasColorTemperature())) {
+      this->*field = TWO_FINGER_SWIPE_NOT_SET;
+      needsResave = true;
+    }
+  }
 
   // The web API shares the base catalog so it can receive raw value 26 even
   // on boards without a Home key. Never retain that reader-only action there.
@@ -776,15 +812,13 @@ bool CrossPointSettings::saveToFile() const {
   std::lock_guard<std::mutex> lock(storeMutex);
   JsonDocument doc;
   toJson(doc);
-  return PersistableStoreBase::writeDocToFile(SETTINGS_FILE_JSON, doc);
+  return PersistableStoreBase::writeDocToFileAtomically(SETTINGS_FILE_JSON, doc);
 }
 
 bool CrossPointSettings::loadFromFile() {
   enum class JsonLoadStatus : uint8_t { MissingOrEmpty, Loaded, Failed };
 
   auto loadJsonSettings = [this](const char* path, bool migrateToCurrentPath) -> JsonLoadStatus {
-    if (!Storage.exists(path)) return JsonLoadStatus::MissingOrEmpty;
-
     JsonDocument doc;
     if (PersistableStoreBase::readDocFromFile(path, doc)) {
       bool result = false;
@@ -817,8 +851,14 @@ bool CrossPointSettings::loadFromFile() {
 
   // Prefer CrossInk's namespaced settings file. Use the old generic file only
   // as a migration fallback so other firmware can keep its own settings.json.
+  const bool hasCrossInkSettings = Storage.exists(SETTINGS_FILE_JSON) || Storage.exists(SETTINGS_FILE_JSON_BAK);
   JsonLoadStatus jsonStatus = loadJsonSettings(SETTINGS_FILE_JSON, false);
-  if (jsonStatus != JsonLoadStatus::MissingOrEmpty) return jsonStatus == JsonLoadStatus::Loaded;
+  // A CrossInk-specific settings file takes precedence even when it is
+  // damaged. Falling through would import another firmware's settings.json
+  // and replace the user's CrossInk preferences.
+  if (hasCrossInkSettings || jsonStatus != JsonLoadStatus::MissingOrEmpty) {
+    return jsonStatus == JsonLoadStatus::Loaded;
+  }
 
   jsonStatus = loadJsonSettings(LEGACY_SETTINGS_FILE_JSON, true);
   if (jsonStatus != JsonLoadStatus::MissingOrEmpty) return jsonStatus == JsonLoadStatus::Loaded;

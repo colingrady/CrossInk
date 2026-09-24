@@ -87,6 +87,7 @@ class Epub {
   uint32_t totalWords = 0;
   uint32_t wordsPerReferencePage = 0;
   uint32_t totalReferencePages = 0;
+  bool referencePagesUseCharacters = false;
   bool xLocationsLoaded = false;
   OpenFailure lastLoadFailure = OpenFailure::None;
   bool sourceSpineMapDeclared = false;
@@ -99,7 +100,7 @@ class Epub {
   void migrateLegacyCachePath(const std::string& cacheDir) const;
   bool findContentOpfFile(std::string* contentOpfFile) const;
   bool parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, bool writeSpineEntries = true,
-                       bool collectCssFiles = true);
+                       bool collectCssFiles = true, bool metadataOnly = false);
   bool parseTocNcxFile() const;
   bool parseTocNavFile() const;
   CssParseStatus parseCssFiles(bool forceRebuild = false) const;
@@ -121,6 +122,13 @@ class Epub {
   std::string& getBasePath() { return contentBasePath; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false,
             XLocationLoadMode xLocationLoadMode = XLocationLoadMode::Immediate, bool cacheCumulativeSpineSizes = false);
+  // Title and author only, without building the spine/TOC/CSS/cover caches
+  // load() does. Reuses an existing metadata cache when there is one unless
+  // allowCachedMetadata is false; that path invalidates a stale full cache and
+  // stops the OPF parse at </metadata>, before the manifest. Used by the
+  // Library index builder, which reads every EPUB on the card and cannot
+  // afford a full load() per book.
+  bool loadMetadata(std::string& title, std::string& author, bool allowCachedMetadata = true);
   // Loads optional stable-page and source-spine metadata after a Skip-mode open.
   // Failure leaves normal size-based progress available.
   bool loadXLocations();
@@ -183,14 +191,17 @@ class Epub {
 
   size_t getBookSize() const;
   bool hasXLocations() const { return xLocationsLoaded; }
-  bool hasStablePageNumbers() const {
-    return xLocationsLoaded && totalWords > 0 && wordsPerReferencePage > 0 && totalReferencePages > 0;
-  }
+  bool hasStablePageNumbers() const;
+  uint32_t getReferencePageCount() const { return hasStablePageNumbers() ? totalReferencePages : 0; }
   float calculateSizeProgress(int currentSpineIndex, float currentSpineRead) const;
   float calculateProgress(int currentSpineIndex, float currentSpineRead) const;
-  bool resolveLocationPercentToSpineProgress(int percent, int& spineIndex, float& spineProgress) const;
+  // percent is 0.0-100.0; callers may pass fractional values from decimal keypad entry.
+  bool resolveLocationPercentToSpineProgress(float percent, int& spineIndex, float& spineProgress) const;
   bool resolveReferencePage(int currentSpineIndex, float currentSpineRead, uint32_t& currentPage,
                             uint32_t& pageCount) const;
+  bool resolveReferencePageToSpineProgress(uint32_t page, int& spineIndex, float& spineProgress) const;
+  bool resolveReferencePageTarget(uint32_t page, int& spineIndex, float& spineProgress, uint32_t& spineUnitOffset,
+                                  uint32_t& spineUnitCount, bool& usesCharacters) const;
   bool resolveChapterGroupRange(int currentSpineIndex, int& firstSpineIndex, int& lastSpineIndex) const;
   bool hasChapterGroups() const { return locationChapterGroupCount > 0; }
   bool hasSourceSpineMap() const { return sourceSpineMapCount > 0; }
