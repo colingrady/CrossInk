@@ -12,6 +12,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <Xtc.h>
 
 #include <algorithm>
 
@@ -36,6 +37,7 @@
 #include "network/UsbDriveActivity.h"
 #include "reader/BookReadingStats.h"
 #include "reader/BookStatsActivity.h"
+#include "reader/BookStatsTracking.h"
 #include "reader/GlobalReadingStats.h"
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
@@ -84,16 +86,23 @@ FrontlightPanelContext buildFrontlightPanelContext(Activity& activity, GfxRender
   const bool lastValid = !APP_STATE.openEpubPath.empty() && FsHelpers::hasEpubExtension(APP_STATE.openEpubPath) &&
                          Storage.exists(APP_STATE.openEpubPath.c_str());
   context.activeReaderBook = hasFrontlightActiveReaderBook(activity.isReaderActivity(), currentBookValid);
+  context.showReadingStatsAction = SETTINGS.shouldTrackReadingStats();
   if (context.activeReaderBook) {
+    if (FsHelpers::hasEpubExtension(currentPath)) {
+      context.showReadingStatsAction =
+          BookStatsTracking::isEnabled(Epub::cachePathForFilePath(currentPath, "/.crosspoint"));
+    } else if (FsHelpers::hasXtcExtension(currentPath)) {
+      context.showReadingStatsAction = BookStatsTracking::isEnabled(Xtc(currentPath, "/.crosspoint").getCachePath());
+    }
     context.bookTitle = activity.getCurrentBookTitle();
     context.bookPath = currentPath;
     context.activeEpub = activity.isEpubReaderActivity() && currentEpubValid;
-    if (shouldShowStickyReaderDetails(hasStickyReaderDetailsPanel(), Frontlight.present(), context.activeReaderBook) &&
-        activity.getFrontlightPanelBookDetails(context.bookDetails)) {
-      context.showReaderDetails = true;
+    if (activity.getFrontlightPanelBookDetails(context.bookDetails)) {
+      context.showReaderDetails =
+          shouldShowStickyReaderDetails(hasStickyReaderDetailsPanel(), Frontlight.present(), context.activeReaderBook);
       context.bookTitle = context.bookDetails.title;
     }
-    context.readingStatsActivity = activity.createFrontlightReadingStatsActivity();
+    if (context.showReadingStatsAction) context.readingStatsActivity = activity.createFrontlightReadingStatsActivity();
     if (context.activeEpub) {
       context.bookPath = currentPath;
       return context;
@@ -101,8 +110,9 @@ FrontlightPanelContext buildFrontlightPanelContext(Activity& activity, GfxRender
     if (context.readingStatsActivity) return context;
   }
 
-  const FrontlightBookSource source = chooseFrontlightBookSource(false, false, lastValid);
+  const FrontlightBookSource source = chooseFrontlightBookSource(false, false, lastValid && !context.activeReaderBook);
 
+  if (!SETTINGS.shouldTrackReadingStats()) return context;
   const GlobalReadingStats global = GlobalReadingStats::load();
   std::string cachePath;
   std::string statsTitle;
@@ -113,7 +123,12 @@ FrontlightPanelContext buildFrontlightPanelContext(Activity& activity, GfxRender
     context.bookTitle = fileNameFromPath(context.bookPath);
     statsTitle = context.bookTitle;
     cachePath = Epub::cachePathForFilePath(context.bookPath, "/.crosspoint");
-    bookStats = BookReadingStats::load(cachePath);
+    if (BookStatsTracking::isBookEnabled(cachePath))
+      bookStats = BookReadingStats::load(cachePath);
+    else {
+      cachePath.clear();
+      statsTitle = tr(STR_READING_STATS);
+    }
     const RecentBook book{context.bookPath, context.bookTitle, {}, {}};
     progress = RecentBookProgress::loadCachedEpubPercent(book);
   } else {
@@ -901,6 +916,7 @@ bool ActivityManager::resumeFileTransferFromNetworkBoot(const uint32_t payload) 
 }
 
 void ActivityManager::goToNearbyStatsSync() {
+  if (!SETTINGS.shouldTrackReadingStats()) return;
   replaceActivity(std::make_unique<NearbyStatsSyncActivity>(renderer, mappedInput));
 }
 
@@ -1238,15 +1254,12 @@ RequestUpdateResult ActivityManager::requestUpdateAndWait() {
 
 // RenderLock
 
-RenderLock::RenderLock() {
-  xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
-  isLocked = true;
+RenderLock::RenderLock(const Mode mode) {
+  isLocked = xSemaphoreTake(activityManager.renderingMutex, mode == Mode::Try ? 0 : portMAX_DELAY) == pdTRUE;
+  assert(mode == Mode::Try || isLocked);
 }
 
-RenderLock::RenderLock([[maybe_unused]] Activity&) {
-  xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
-  isLocked = true;
-}
+RenderLock::RenderLock([[maybe_unused]] Activity&, const Mode mode) : RenderLock(mode) {}
 
 RenderLock::~RenderLock() {
   if (isLocked) {

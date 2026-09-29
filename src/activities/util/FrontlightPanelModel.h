@@ -40,6 +40,9 @@ struct FrontlightPanelBookDetails {
   std::string title;
   std::string author;
   std::string chapter;
+  uint32_t chapterPage = 0;
+  uint32_t chapterPageCount = 0;
+  bool chapterPageCountEstimated = false;
   int progressPercent = 0;
 };
 
@@ -63,6 +66,7 @@ struct FrontlightPanelContext {
   bool activeReaderBook = false;
   bool activeEpub = false;
   bool showReaderDetails = false;
+  bool showReadingStatsAction = true;
   std::string bookTitle;
   std::string bookPath;
   FrontlightPanelBookDetails bookDetails;

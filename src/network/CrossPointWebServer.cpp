@@ -39,6 +39,7 @@
 #include "html/js/jszip_minJs.generated.h"
 #include "util/BookCacheUtils.h"
 #include "util/FontFamilyLabel.h"
+#include "util/ReaderStatusBarJson.h"
 #include "util/StringUtils.h"
 
 namespace {
@@ -76,6 +77,14 @@ bool isWebEnumOptionAvailable(const SettingInfo& setting, size_t optionIndex) {
   if (optionIndex >= setting.enumValues.size()) return true;
 
   const StrId option = setting.enumValues[optionIndex];
+  if (!SETTINGS.shouldTrackReadingStats()) {
+    if (option == StrId::STR_READING_STATS) return false;
+    if (setting.valuePtr == &CrossPointSettings::sleepScreen && optionIndex < setting.enumRawValues.size()) {
+      const uint8_t raw = setting.enumRawValues[optionIndex];
+      if (raw == CrossPointSettings::READING_STATS_SLEEP || raw == CrossPointSettings::MINIMAL_STATS_SLEEP)
+        return false;
+    }
+  }
   if (option == StrId::STR_TOGGLE_TOUCHSCREEN && !gpio.hasTouch()) return false;
 
   if (!Frontlight.present()) {
@@ -106,6 +115,9 @@ uint8_t enumDisplayIndexForWeb(const SettingInfo& setting, uint8_t rawValue) {
 }
 
 bool isWebSettingAvailable(const SettingInfo& setting) {
+  if (setting.category == StrId::STR_STATUS_BARS || setting.nameId == StrId::STR_HIDE_CLOCK) {
+    return false;
+  }
   if (setting.nameId == StrId::STR_SIDE_BUTTON_CHORD && !deviceSupportsSideButtonChord(gpio)) {
     return false;
   }
@@ -147,6 +159,7 @@ bool isWebSettingAvailable(const SettingInfo& setting) {
   if (!halClock.isAvailable()) {
     switch (setting.nameId) {
       case StrId::STR_HIDE_CLOCK:
+      case StrId::STR_CLOCK_OUTSIDE_READER:
       case StrId::STR_AUTO_BACKUP_STATS:
       case StrId::STR_CLOCK_UTC_OFFSET:
       case StrId::STR_CLOCK_FORMAT:
@@ -385,6 +398,8 @@ void CrossPointWebServer::begin() {
   server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
   server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
   server->on("/api/settings", HTTP_POST, [this] { handlePostSettings(); });
+  server->on("/api/status-bars", HTTP_GET, [this] { handleGetStatusBars(); });
+  server->on("/api/status-bars", HTTP_POST, [this] { handlePostStatusBars(); });
 
   // Font management endpoints
   server->on("/fonts", HTTP_GET, [this] { handleFontsPage(); });
@@ -1404,6 +1419,95 @@ void CrossPointWebServer::handleSettingsPage() const {
   sendStaticContent(server.get(), SettingsPageHtml, sizeof(SettingsPageHtml), SettingsPageHtmlETag);
 }
 
+void CrossPointWebServer::handleGetStatusBars() const {
+  JsonDocument doc;
+  writeReaderStatusBarJson(doc["top"].to<JsonObject>(), SETTINGS.readerStatusBar(ReaderStatusBarPosition::Top));
+  writeReaderStatusBarJson(doc["bottom"].to<JsonObject>(), SETTINGS.readerStatusBar(ReaderStatusBarPosition::Bottom));
+  doc["xtcMode"] = SETTINGS.xtcStatusBarMode;
+  doc["clockAvailable"] = halClock.isAvailable();
+
+  JsonObject labels = doc["labels"].to<JsonObject>();
+  labels["top"] = tr(STR_TOP_STATUS_BAR);
+  labels["bottom"] = tr(STR_BOTTOM_STATUS_BAR);
+  labels["left"] = tr(STR_STATUS_BAR_LEFT);
+  labels["center"] = tr(STR_CENTER);
+  labels["right"] = tr(STR_STATUS_BAR_RIGHT);
+  labels["percentageFormat"] = tr(STR_PERCENTAGE_FORMAT);
+  labels["progressBar"] = tr(STR_PROGRESS_BAR);
+  labels["thickness"] = tr(STR_PROGRESS_BAR_THICKNESS);
+  labels["xtcMode"] = tr(STR_XTC_STATUS_BAR);
+  labels["preview"] = tr(STR_PREVIEW);
+
+  JsonArray options = doc["options"].to<JsonArray>();
+  const auto addOption = [&options](ReaderStatusBarItem item, const std::string& label) {
+    JsonObject option = options.add<JsonObject>();
+    option["value"] = static_cast<uint8_t>(item);
+    option["label"] = label;
+  };
+  addOption(ReaderStatusBarItem::Clock, tr(STR_STATUS_BAR_CLOCK));
+  addOption(ReaderStatusBarItem::Battery, tr(STR_BATTERY));
+  const auto combined = [](const char* first, const char* second) { return std::string(first) + " (" + second + ")"; };
+  addOption(ReaderStatusBarItem::TimeLeftBook, combined(tr(STR_TIME_LEFT), tr(STR_BOOK)).c_str());
+  addOption(ReaderStatusBarItem::TimeLeftChapter, combined(tr(STR_TIME_LEFT), tr(STR_CHAPTER)).c_str());
+  addOption(ReaderStatusBarItem::ChapterPageCount, tr(STR_CHAPTER_PAGE_COUNT));
+  addOption(ReaderStatusBarItem::StablePageNumber, tr(STR_STABLE_PAGE_NUMBERS));
+  addOption(ReaderStatusBarItem::BookProgressPercentage, tr(STR_BOOK_PROGRESS_PERCENTAGE));
+  addOption(ReaderStatusBarItem::TitleBook, combined(tr(STR_TITLE), tr(STR_BOOK)).c_str());
+  addOption(ReaderStatusBarItem::TitleChapter, combined(tr(STR_TITLE), tr(STR_CHAPTER)).c_str());
+  addOption(ReaderStatusBarItem::Empty, tr(STR_STATUS_BAR_EMPTY));
+
+  const auto addLabels = [&doc](const char* name, std::initializer_list<StrId> ids) {
+    JsonArray labels = doc[name].to<JsonArray>();
+    for (const StrId id : ids) labels.add(I18N.get(id));
+  };
+  addLabels("percentageFormats", {StrId::STR_PERCENTAGE_FORMAT_WHOLE, StrId::STR_PERCENTAGE_FORMAT_ONE_DECIMAL,
+                                  StrId::STR_PERCENTAGE_FORMAT_TWO_DECIMALS});
+  addLabels("progressModes", {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE});
+  addLabels("thicknesses",
+            {StrId::STR_PROGRESS_BAR_THIN, StrId::STR_PROGRESS_BAR_MEDIUM, StrId::STR_PROGRESS_BAR_THICK});
+  addLabels("xtcModes", {StrId::STR_HIDE, StrId::STR_BOTTOM, StrId::STR_TOP, StrId::STR_STATUS_BAR_BOTH});
+
+  String payload;
+  serializeJson(doc, payload);
+  server->send(200, "application/json", payload);
+}
+
+void CrossPointWebServer::handlePostStatusBars() {
+  if (!server->hasArg("plain")) {
+    server->send(400, "text/plain", "Missing JSON body");
+    return;
+  }
+  JsonDocument doc;
+  if (deserializeJson(doc, server->arg("plain"))) {
+    server->send(400, "text/plain", "Invalid JSON");
+    return;
+  }
+  ReaderStatusBarsPayload bars;
+  if (!CrossPointSettings::parseReaderStatusBars(doc.as<JsonVariantConst>(), bars)) {
+    server->send(400, "text/plain", "Invalid status bar configuration");
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(SETTINGS.getMutex());
+    const auto& previousTop = SETTINGS.topReaderStatusBar;
+    if (previousTop.slots != bars.top.slots || previousTop.percentageFormat != bars.top.percentageFormat ||
+        previousTop.progressBar != bars.top.progressBar ||
+        previousTop.progressBarThickness != bars.top.progressBarThickness ||
+        SETTINGS.xtcStatusBarMode != bars.xtcMode) {
+      SETTINGS.legacyXtcTopUsesBottom = 0;
+    }
+    SETTINGS.topReaderStatusBar = bars.top;
+    SETTINGS.bottomReaderStatusBar = bars.bottom;
+    SETTINGS.xtcStatusBarMode = bars.xtcMode;
+  }
+  if (!SETTINGS.saveToFile()) {
+    LOG_ERR("WEB", "Failed to save status bar configuration");
+    server->send(500, "text/plain", "Failed to save status bars");
+    return;
+  }
+  server->send(200, "text/plain", "Status bars saved");
+}
+
 void CrossPointWebServer::handleGetSettings() const {
   // The device settings UI needs an owned, mutable copy of the settings list.
   // The web API only reads it, so iterate the static base list directly rather
@@ -1428,7 +1532,12 @@ void CrossPointWebServer::handleGetSettings() const {
 
     doc.clear();
     doc["key"] = s.key;
-    doc["name"] = I18N.get(s.nameId);
+    if (isSideButtonActionSetting(s)) {
+      const bool up = settingKeyIs(s, "sideButtonUpShort") || settingKeyIs(s, "sideButtonUpLong");
+      doc["name"] = sideButtonGroupLabel(up) + " " + I18N.get(s.nameId);
+    } else {
+      doc["name"] = I18N.get(s.nameId);
+    }
     doc["category"] = I18N.get(s.category);
 
     switch (s.type) {
@@ -1441,6 +1550,12 @@ void CrossPointWebServer::handleGetSettings() const {
       }
       case SettingType::ENUM: {
         doc["type"] = "enum";
+        if (s.valuePtr == &CrossPointSettings::shortPwrBtn || s.valuePtr == &CrossPointSettings::longPwrBtn) {
+          doc["footnotesIndex"] = enumDisplayIndexForWeb(s, CrossPointSettings::FOOTNOTES);
+        } else if (s.valuePtr == &CrossPointSettings::longPressMenuAction ||
+                   s.valuePtr == &CrossPointSettings::longPressBackAction) {
+          doc["footnotesIndex"] = enumDisplayIndexForWeb(s, CrossPointSettings::LONG_MENU_FOOTNOTES);
+        }
         if (s.nameId == StrId::STR_FONT_FAMILY && !fontFamilies.empty()) {
           uint8_t selected = SETTINGS.fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? SETTINGS.fontFamily : 0;
           if (selectedSdFamily) {
@@ -1485,7 +1600,7 @@ void CrossPointWebServer::handleGetSettings() const {
         } else {
           for (size_t optionIndex = 0; optionIndex < s.enumValues.size(); ++optionIndex) {
             if (isWebEnumOptionAvailable(s, optionIndex)) {
-              options.add(I18N.get(s.enumValues[optionIndex]));
+              options.add(sideButtonOptionLabel(s, static_cast<uint8_t>(optionIndex)));
             }
           }
         }

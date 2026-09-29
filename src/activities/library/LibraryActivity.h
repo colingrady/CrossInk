@@ -19,25 +19,31 @@ class LibraryActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
-  bool blocksGlobalInput() const override { return sortPopup.isActive(); }
+  bool blocksGlobalInput() const override { return actionPopup.isActive(); }
 
  private:
   enum class Sort : uint8_t { DateAdded, Title, AuthorLast, AuthorFirst, RecentlyRead, Series, Genre };
-  // Ring: refresh, search, settings, sort method, direction, then the book rows. All controls are
-  // reachable on button-only devices as well as through SDK touch routing.
+  // Touch header controls precede the book rows; button-only navigation visits books directly.
   static constexpr int CONTROL_COUNT = 5;
   using UiApp = freeink::ui::FreeInkApp<32, 4>;
   freeink::ui::GfxRendererTarget uiTarget;
   UiApp app;
   ButtonNavigator buttonNavigator;
   freeink::ui::ListNav listNav;
-  OptionPopup sortPopup;
+  OptionPopup actionPopup;
   library::LibraryIndexFile index;
   Sort sort = Sort::RecentlyRead;
   bool descending = true;
   int selection = CONTROL_COUNT;
   bool showSelection = true;
   int topIndex = 0;
+  int gridPageStart = 0;
+  int loadedGridPageStart = -1;
+  int nextGridCoverRow = -1;
+  int16_t gridCoverWidth = 0;
+  int16_t gridCoverHeight = 0;
+  int gridProgressRow = -1;
+  float gridProgress = -1.0f;
   bool uiReady = false;
   bool initialScanPending = false;
   bool longPressFired = false;
@@ -68,6 +74,11 @@ class LibraryActivity final : public Activity {
   static void onControlEvent(const freeink::ui::ActionEvent& event, void* user);
   static void provideRow(void* user, uint16_t row, freeink::ui::ListItem& item);
   void buildListScreen(UiApp::ScreenType& screen);
+  void buildGrid(UiApp::ScreenType& screen);
+  void loadGridPageCovers();
+  bool loadGridCover(int row);
+  void loadGridProgress();
+  bool gridEnabled() const;
   void buildSortHeader(UiApp::ScreenType& screen);
   const char* sortLabel() const;
   library::SortOrder indexOrder() const;
@@ -78,13 +89,15 @@ class LibraryActivity final : public Activity {
   uint16_t dateGroupForRow(int row);
   bool metadataGroupForRow(int row, std::string& out);
   bool hasActiveFilter() const;
+  void refreshIndexIfNeeded();
   bool rebuildIndex(bool showScanning);
   void resolveRecents();
   void applyFilter();
   void resetViewport();
   void reloadAfterBookAction();
   void openBook(int row);
-  void openSortPicker();
+  void openSortPicker(int selectedIndex = -1);
+  void openMenu();
   void refreshLibrary();
   void openSearch();
   void openSettings();

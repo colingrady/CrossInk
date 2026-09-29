@@ -2,6 +2,7 @@
 
 #include "SimulatorSmokeTest.h"
 
+#include <Epub.h>
 #include <HalStorage.h>
 #include <LibraryBuilder.h>
 #include <LibraryIndexFile.h>
@@ -25,17 +26,21 @@
 #include "CrossPointSettings.h"
 #include "DeviceCapabilities.h"
 #include "MappedInputManager.h"
+#include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
 #include "activities/ActivityManager.h"
-#include "activities/reader/EpubReaderMenuActivity.h"
+#include "activities/home/RecentBookProgress.h"
+#include "activities/reader/EpubReaderDrawerActivity.h"
 #include "activities/reader/ReaderFontLoading.h"
 #include "activities/reader/ReaderOptionsActivity.h"
 #include "activities/reader/ReaderUtils.h"
+#include "activities/reader/SideButtonShortcuts.h"
 #include "activities/settings/QuickActionsActivity.h"
 #include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
 #include "simulator/SimulatorHomeKeyInput.h"
+#include "util/ButtonShortcutController.h"
 
 extern ActivityManager activityManager;
 extern GfxRenderer renderer;
@@ -50,6 +55,7 @@ enum class SmokeStep : uint8_t {
   FileBrowserSettings,
   Library,
   Settings,
+  SideButtons,
   ReaderOptions,
   ReaderMenu,
   Sleep,
@@ -109,6 +115,8 @@ class SimulatorSmokeTest {
   const char* activeStepName = nullptr;
   std::vector<ScriptAction> inputScript;
   size_t scriptIndex = 0;
+  unsigned libraryRefreshPass = 0;
+  uint16_t libraryBaselineBooks = 0;
   SmokeStep inputCompletionStep = SmokeStep::Done;
 
   static bool enabled() { return std::getenv("CROSSINK_SIMULATOR_SMOKE_TEST") != nullptr; }
@@ -368,6 +376,7 @@ class SimulatorSmokeTest {
     SETTINGS.librarySortMethod = 3;
     SETTINGS.librarySortDescending = 0;
     SETTINGS.libraryListExpanded = 1;
+    SETTINGS.recentBooksView = CrossPointSettings::RECENT_BOOKS_GRID;
     SETTINGS.libraryShowMarkdown = 0;
     SETTINGS.libraryHideFinishedBooks = 1;
     JsonDocument librarySaved;
@@ -375,20 +384,29 @@ class SimulatorSmokeTest {
     SETTINGS.librarySortMethod = 0;
     SETTINGS.librarySortDescending = 1;
     SETTINGS.libraryListExpanded = 0;
+    SETTINGS.recentBooksView = CrossPointSettings::RECENT_BOOKS_LIST;
     SETTINGS.libraryShowMarkdown = 1;
     SETTINGS.libraryHideFinishedBooks = 0;
     SETTINGS.fromJson(librarySaved.as<JsonVariantConst>());
     if (SETTINGS.librarySortMethod != 3 || SETTINGS.librarySortDescending || !SETTINGS.libraryListExpanded ||
-        SETTINGS.libraryShowMarkdown || !SETTINGS.libraryHideFinishedBooks) {
+        SETTINGS.recentBooksView != CrossPointSettings::RECENT_BOOKS_GRID || SETTINGS.libraryShowMarkdown ||
+        !SETTINGS.libraryHideFinishedBooks) {
       fail("Library settings round-trip mismatch");
     }
     librarySaved["librarySortMethod"] = 99;
     librarySaved["libraryShowTxt"] = 2;
     librarySaved["libraryHideFinishedBooks"] = 2;
+    librarySaved["recentBooksView"] = 2;
     SETTINGS.fromJson(librarySaved.as<JsonVariantConst>());
-    if (SETTINGS.librarySortMethod != 3 || SETTINGS.libraryShowTxt != 1 || !SETTINGS.libraryHideFinishedBooks) {
+    if (SETTINGS.librarySortMethod != 3 || SETTINGS.libraryShowTxt != 1 || !SETTINGS.libraryHideFinishedBooks ||
+        SETTINGS.recentBooksView != CrossPointSettings::RECENT_BOOKS_LIST) {
       fail("Invalid Library settings were not rejected");
     }
+    librarySaved.remove("recentBooksView");
+    SETTINGS.recentBooksView = CrossPointSettings::RECENT_BOOKS_GRID;
+    SETTINGS.fromJson(librarySaved.as<JsonVariantConst>());
+    if (SETTINGS.recentBooksView != CrossPointSettings::RECENT_BOOKS_LIST)
+      fail("Missing Recently Opened view did not default to List");
     SETTINGS.fromJson(original.as<JsonVariantConst>());
   }
 
@@ -412,10 +430,6 @@ class SimulatorSmokeTest {
     });
     if (chordSetting == allSettings.end()) fail("Power chord setting is missing");
     if (std::find(chordSetting->enumRawValues.begin(), chordSetting->enumRawValues.end(),
-                  CrossPointSettings::CHORD_SLEEP) != chordSetting->enumRawValues.end()) {
-      fail("Sleep is still offered for a chord that cannot wake the device");
-    }
-    if (std::find(chordSetting->enumRawValues.begin(), chordSetting->enumRawValues.end(),
                   CrossPointSettings::CHORD_QUICK_ACTIONS) == chordSetting->enumRawValues.end()) {
       fail("Quick Actions is missing from the Power + Up chord setting");
     }
@@ -438,6 +452,213 @@ class SimulatorSmokeTest {
                   CrossPointSettings::CHORD_TOGGLE_FRONTLIGHT) != chordSetting->enumRawValues.end()) {
       fail("Toggle Frontlight is still offered without a frontlight");
     }
+
+    const auto hasLibrary = [](const SettingInfo& setting, const ShortcutOptionCatalog catalog) {
+      const auto raw = shortcutRawValue(catalog, CrossPointSettings::LIBRARY);
+      const auto choice = std::find(setting.enumRawValues.begin(), setting.enumRawValues.end(), raw);
+      return choice != setting.enumRawValues.end() &&
+             setting.enumValues[static_cast<size_t>(choice - setting.enumRawValues.begin())] == StrId::STR_LIBRARY;
+    };
+    const auto verifyLibraryChoice = [&](const char* key, const ShortcutOptionCatalog catalog) {
+      const auto setting = std::find_if(allSettings.begin(), allSettings.end(),
+                                        [key](const SettingInfo& candidate) { return settingKeyIs(candidate, key); });
+      if (setting == allSettings.end() || !hasLibrary(*setting, catalog)) {
+        fail("Library shortcut is missing or mislabeled in %s", key);
+      }
+    };
+    verifyLibraryChoice("shortPwrBtn", ShortcutOptionCatalog::PowerButton);
+    verifyLibraryChoice("longPwrBtn", ShortcutOptionCatalog::PowerButton);
+    for (const char* key : {"sideButtonUpShort", "sideButtonUpLong", "sideButtonDownShort", "sideButtonDownLong"}) {
+      verifyLibraryChoice(key, ShortcutOptionCatalog::SideButton);
+    }
+    verifyLibraryChoice("powerChordAction", ShortcutOptionCatalog::ButtonChord);
+    verifyLibraryChoice("longPressMenuAction", ShortcutOptionCatalog::LongPress);
+    verifyLibraryChoice("longPressBackAction", ShortcutOptionCatalog::LongPress);
+    const auto verifySleepChoice = [&](const char* key, const ShortcutOptionCatalog catalog) {
+      const auto setting = std::find_if(allSettings.begin(), allSettings.end(),
+                                        [key](const SettingInfo& candidate) { return settingKeyIs(candidate, key); });
+      const auto raw = shortcutRawValue(catalog, CrossPointSettings::SLEEP);
+      if (setting == allSettings.end() || raw == SHORTCUT_OPTION_UNAVAILABLE) {
+        fail("Sleep shortcut is missing from %s", key);
+      }
+      const auto choice = std::find(setting->enumRawValues.begin(), setting->enumRawValues.end(), raw);
+      const std::string expected = catalog == ShortcutOptionCatalog::PowerButton
+                                       ? std::string(tr(STR_SLEEP)) + "/" + tr(STR_WAKE)
+                                       : tr(STR_SLEEP);
+      if (choice == setting->enumRawValues.end() ||
+          sideButtonOptionLabel(*setting, static_cast<uint8_t>(choice - setting->enumRawValues.begin())) != expected) {
+        fail("Sleep shortcut has the wrong label in %s", key);
+      }
+    };
+    verifySleepChoice("shortPwrBtn", ShortcutOptionCatalog::PowerButton);
+    verifySleepChoice("longPwrBtn", ShortcutOptionCatalog::PowerButton);
+    for (const char* key : {"shortPwrBtn", "longPwrBtn"}) {
+      const auto setting = std::find_if(allSettings.begin(), allSettings.end(),
+                                        [key](const SettingInfo& candidate) { return settingKeyIs(candidate, key); });
+      if (setting == allSettings.end()) fail("Power shortcut setting is missing: %s", key);
+      for (const auto [action, label] : {std::pair{CrossPointSettings::SLEEP_ONLY, StrId::STR_SLEEP},
+                                         std::pair{CrossPointSettings::WAKE_ONLY, StrId::STR_WAKE}}) {
+        const auto choice = std::find(setting->enumRawValues.begin(), setting->enumRawValues.end(), action);
+        if (choice == setting->enumRawValues.end() ||
+            sideButtonOptionLabel(*setting, static_cast<uint8_t>(choice - setting->enumRawValues.begin())) !=
+                I18N.get(label)) {
+          fail("Power-only shortcut is missing or mislabeled in %s", key);
+        }
+      }
+    }
+    const uint8_t savedShortPowerAction = SETTINGS.shortPwrBtn;
+    for (const auto [action, wakes] :
+         {std::pair{CrossPointSettings::IGNORE, false}, std::pair{CrossPointSettings::SLEEP_ONLY, false},
+          std::pair{CrossPointSettings::WAKE_ONLY, true}, std::pair{CrossPointSettings::SLEEP, true}}) {
+      SETTINGS.shortPwrBtn = action;
+      if (SETTINGS.shortPowerPressWakes() != wakes) fail("Short Power wake policy does not match its shortcut");
+    }
+    SETTINGS.shortPwrBtn = savedShortPowerAction;
+    verifySleepChoice("powerChordAction", ShortcutOptionCatalog::ButtonChord);
+    verifySleepChoice("longPressMenuAction", ShortcutOptionCatalog::LongPress);
+    verifySleepChoice("longPressBackAction", ShortcutOptionCatalog::LongPress);
+    for (const char* key : {"sideButtonUpShort", "sideButtonUpLong", "sideButtonDownShort", "sideButtonDownLong"}) {
+      const auto side = std::find_if(sideButtonSettings.begin(), sideButtonSettings.end(),
+                                     [key](const SettingInfo& candidate) { return settingKeyIs(candidate, key); });
+      if (side != sideButtonSettings.end()) {
+        const auto sleep = std::find(side->enumRawValues.begin(), side->enumRawValues.end(), CrossPointSettings::SLEEP);
+        if (sleep == side->enumRawValues.end() ||
+            sideButtonOptionLabel(*side, static_cast<uint8_t>(sleep - side->enumRawValues.begin())) != tr(STR_SLEEP)) {
+          fail("Sleep shortcut has the wrong label in %s", key);
+        }
+      }
+    }
+    if (gpio.hasHomeKey()) {
+      verifyLibraryChoice("homeButtonTapAction", ShortcutOptionCatalog::HomeButton);
+      verifyLibraryChoice("homeButtonDoubleTapAction", ShortcutOptionCatalog::HomeButton);
+      verifyLibraryChoice("homeButtonLongPressAction", ShortcutOptionCatalog::HomeButton);
+      verifySleepChoice("homeButtonTapAction", ShortcutOptionCatalog::HomeButton);
+      verifySleepChoice("homeButtonDoubleTapAction", ShortcutOptionCatalog::HomeButton);
+      verifySleepChoice("homeButtonLongPressAction", ShortcutOptionCatalog::HomeButton);
+    }
+    if (hasSideButtonChord) {
+      const auto side =
+          std::find_if(sideButtonSettings.begin(), sideButtonSettings.end(),
+                       [](const SettingInfo& setting) { return settingKeyIs(setting, "sideButtonChordAction"); });
+      if (side == sideButtonSettings.end() || !hasLibrary(*side, ShortcutOptionCatalog::ButtonChord)) {
+        fail("Library shortcut is missing from the filtered Up + Down choices");
+      }
+      const auto sleep =
+          std::find(side->enumRawValues.begin(), side->enumRawValues.end(), CrossPointSettings::CHORD_SLEEP);
+      if (sleep == side->enumRawValues.end() ||
+          sideButtonOptionLabel(*side, static_cast<uint8_t>(sleep - side->enumRawValues.begin())) != tr(STR_SLEEP)) {
+        fail("Sleep shortcut is missing or mislabeled in the filtered Up + Down choices");
+      }
+    }
+    if (!QuickActions::isQuickActionSlotActionAvailable(CrossPointSettings::LIBRARY) ||
+        QuickActions::actionLabel(CrossPointSettings::LIBRARY) != StrId::STR_LIBRARY) {
+      fail("Library is missing from Quick Actions choices");
+    }
+
+    const uint8_t savedTrackReadingStats = SETTINGS.trackReadingStats;
+    SETTINGS.trackReadingStats = 0;
+    const auto statsDisabledSettings = getSettingsList();
+    SETTINGS.trackReadingStats = savedTrackReadingStats;
+    for (const char* key : {"sideButtonUpShort", "sideButtonUpLong", "sideButtonDownShort", "sideButtonDownLong"}) {
+      const auto setting = std::find_if(statsDisabledSettings.begin(), statsDisabledSettings.end(),
+                                        [key](const SettingInfo& candidate) { return settingKeyIs(candidate, key); });
+      if (setting == statsDisabledSettings.end() ||
+          std::find(setting->enumRawValues.begin(), setting->enumRawValues.end(), CrossPointSettings::READING_STATS) !=
+              setting->enumRawValues.end()) {
+        fail("Reading Stats remains available in %s while tracking is disabled", key);
+      }
+    }
+  }
+
+  static void verifySideButtonMigrationAndInput() {
+    JsonDocument original;
+    SETTINGS.toJson(original);
+    JsonDocument legacy;
+    SETTINGS.toJson(legacy);
+    for (const char* key : {"sideButtonUpShort", "sideButtonUpLong", "sideButtonDownShort", "sideButtonDownLong"}) {
+      legacy[key] = nullptr;
+    }
+    legacy["sideButtonLayout"] = CrossPointSettings::NEXT_PREV;
+    legacy["sideButtonLongPress"] = CrossPointSettings::SIDE_LONG_CHAPTER_SKIP;
+    SETTINGS.fromJson(legacy.as<JsonVariantConst>());
+    if (SETTINGS.sideButtonUpShort != CrossPointSettings::PAGE_TURN ||
+        SETTINGS.sideButtonDownShort != CrossPointSettings::PREVIOUS_PAGE ||
+        SETTINGS.sideButtonUpLong != CrossPointSettings::SIDE_NEXT_CHAPTER ||
+        SETTINGS.sideButtonDownLong != CrossPointSettings::SIDE_PREVIOUS_CHAPTER)
+      fail("Swapped side-button layout migration failed");
+
+    legacy["sideButtonLayout"] = CrossPointSettings::SIDE_BUTTONS_DISABLED;
+    legacy["sideButtonLongPress"] = CrossPointSettings::SIDE_LONG_FONT_SIZE;
+    SETTINGS.fromJson(legacy.as<JsonVariantConst>());
+    if (SETTINGS.sideButtonUpShort != CrossPointSettings::IGNORE ||
+        SETTINGS.sideButtonDownShort != CrossPointSettings::IGNORE ||
+        SETTINGS.sideButtonUpLong != CrossPointSettings::SIDE_INCREASE_FONT ||
+        SETTINGS.sideButtonDownLong != CrossPointSettings::SIDE_DECREASE_FONT)
+      fail("Disabled layout with font hold migration failed");
+
+    legacy["sideButtonUpShort"] = CrossPointSettings::LIBRARY;
+    SETTINGS.fromJson(legacy.as<JsonVariantConst>());
+    if (SETTINGS.sideButtonUpShort != CrossPointSettings::LIBRARY ||
+        SETTINGS.sideButtonDownShort != CrossPointSettings::IGNORE)
+      fail("Partially migrated side-button choices were overwritten");
+
+    SETTINGS.fromJson(original.as<JsonVariantConst>());
+    const auto sideSettings = buildControlsSideButtonSettingsList(getSettingsList());
+    const size_t expected = 7 + (deviceSupportsSideButtonChord(gpio) ? 1u : 0u);
+    if (sideSettings.size() != expected) fail("Side-button menu row count mismatch");
+    for (const char* key : {"sideButtonUpShort", "sideButtonUpLong", "sideButtonDownShort", "sideButtonDownLong"}) {
+      if (std::find_if(sideSettings.begin(), sideSettings.end(),
+                       [key](const SettingInfo& setting) { return settingKeyIs(setting, key); }) == sideSettings.end())
+        fail("Side-button menu is missing an individual shortcut");
+    }
+
+    SideButtonShortcuts shortcuts;
+    mappedInputManager.simulatorInjectPress(MappedInputManager::Button::Up);
+    const auto heldUp = shortcuts.update(mappedInputManager, 1000);
+    if (!heldUp.consumed) fail("Side-button press was not captured");
+    mappedInputManager.injectRelease(MappedInputManager::Button::Right);
+    if (SideButtonShortcuts::shouldConsume(heldUp, mappedInputManager))
+      fail("Side-button hold swallowed a chord page turn");
+    mappedInputManager.clearInjectedReleases();
+    mappedInputManager.simulatorClearInputFrame();
+    mappedInputManager.simulatorInjectRelease(MappedInputManager::Button::Up);
+    const auto shortResult = shortcuts.update(mappedInputManager, 1200);
+    if (!shortResult.triggered || shortResult.longPress || shortResult.action != SETTINGS.sideButtonUpShort)
+      fail("Side-button short action did not dispatch once");
+    mappedInputManager.simulatorClearInputFrame();
+    if (shortcuts.update(mappedInputManager, 1300).triggered) fail("Side-button release dispatched twice");
+
+    mappedInputManager.simulatorInjectPress(MappedInputManager::Button::Down);
+    shortcuts.update(mappedInputManager, 2000);
+    mappedInputManager.simulatorClearInputFrame();
+    const auto longResult = shortcuts.update(mappedInputManager, 2800);
+    if (!longResult.triggered || !longResult.longPress || longResult.action != SETTINGS.sideButtonDownLong)
+      fail("Side-button long action did not dispatch");
+    mappedInputManager.suppressNextSideRelease(MappedInputManager::Button::Down);
+    mappedInputManager.simulatorInjectRelease(MappedInputManager::Button::Down);
+    if (mappedInputManager.wasReleased(MappedInputManager::Button::Down) ||
+        shortcuts.update(mappedInputManager, 2900).triggered)
+      fail("Side-button long release leaked into the next activity");
+    mappedInputManager.simulatorClearInputFrame();
+    if (shortcuts.update(mappedInputManager, 3000).triggered) fail("Side-button long action dispatched twice");
+
+    ButtonShortcutController lock;
+    lock.toggleQuickLock(4000, QuickLockTrigger::SideUpShort);
+    if (lock.tryUnlockSide(4100, true, true, false, true, false, false, false, true, ReaderUtils::SKIP_HOLD_MS) ||
+        !lock.isQuickLocked())
+      fail("Side-button Quick Lock unlocked on press instead of release");
+    if (!lock.tryUnlockSide(4200, false, false, true, true, false, false, false, true, ReaderUtils::SKIP_HOLD_MS) ||
+        lock.isQuickLocked())
+      fail("Side-button short Quick Lock did not unlock on a fresh release");
+    lock.toggleQuickLock(5000, QuickLockTrigger::SideDownLong);
+    if (lock.tryUnlockSide(5100, false, false, false, true, true, false, false, true, ReaderUtils::SKIP_HOLD_MS))
+      fail("An inherited side-button hold unlocked Quick Lock");
+    lock.tryUnlockSide(5200, false, false, false, true, false, false, true, true, ReaderUtils::SKIP_HOLD_MS);
+    lock.tryUnlockSide(5300, false, false, false, true, true, true, false, true, ReaderUtils::SKIP_HOLD_MS);
+    if (!lock.tryUnlockSide(6000, false, false, false, true, true, false, false, true, ReaderUtils::SKIP_HOLD_MS) ||
+        lock.isQuickLocked())
+      fail("Side-button long Quick Lock did not unlock on a fresh hold");
+    LOG_INF("SMOKE", "Side-button migration and press/release checks passed");
   }
 
   [[noreturn]] static void fail(const char* message) {
@@ -488,6 +709,26 @@ class SimulatorSmokeTest {
     LOG_INF("SMOKE", "Loading popup preserves backdrop in all orientations");
   }
 
+  static void verifyCachedHomeProgressMigration() {
+    const RecentBook book{"/books/legacy-home-smoke.epub", "Legacy Home smoke", {}, {}};
+    const std::string legacy = "/.crosspoint/epub_" + std::to_string(std::hash<std::string>{}(book.path));
+    const std::string current = Epub::cachePathForFilePath(book.path, "/.crosspoint");
+    if (legacy == current || Storage.exists(book.path.c_str())) fail("Invalid legacy Home fixture");
+    if (!Storage.mkdir(legacy.c_str())) fail("Cannot create legacy Home cache");
+    RecentBookProgress::saveCachedEpubPercent(legacy, 42.5f);
+    // There is deliberately no EPUB or book.bin. This must migrate and read the
+    // tiny saved percentage without attempting to open, parse or index a book.
+    if (RecentBookProgress::loadCachedEpubPercent(book) != 42.5f || Storage.exists(legacy.c_str()) ||
+        !Storage.exists(current.c_str()) || BookMetadataCache::exists(current))
+      fail("Home did not recover legacy cached progress without opening the EPUB");
+    if (!Storage.mkdir(legacy.c_str())) fail("Cannot recreate stale legacy Home cache");
+    RecentBookProgress::saveCachedEpubPercent(legacy, 90.0f);
+    if (RecentBookProgress::loadCachedEpubPercent(book) != 42.5f || !Storage.exists(legacy.c_str()))
+      fail("Stale legacy progress replaced the current Home cache");
+    if (!Storage.removeDir(legacy.c_str()) || !Storage.removeDir(current.c_str())) fail("Cannot remove Home fixtures");
+    LOG_INF("SMOKE", "Legacy Home progress migration without EPUB loading passed");
+  }
+
   void tickImpl() {
     mappedInputManager.simulatorClearInputFrame();
 
@@ -504,6 +745,7 @@ class SimulatorSmokeTest {
       case SmokeStep::Start:
         LOG_INF("SMOKE", "Starting simulator smoke test");
         verifyLoadingPopupBackdrop();
+        verifyCachedHomeProgressMigration();
         if (!CrossPointSettings::verifySleepTimeoutMigrationContract()) {
           fail("Sleep timeout migration contract failed");
         }
@@ -514,6 +756,7 @@ class SimulatorSmokeTest {
           fail("Simulator Home key timing contract failed");
         }
         verifyUpDownShortcutAvailability();
+        verifySideButtonMigrationAndInput();
         verifyReaderControlsSettings();
         verifyMixedPageGestures();
 #if CROSSINK_SCALABLE_FONTS
@@ -745,8 +988,33 @@ class SimulatorSmokeTest {
         const bool hasFixture = std::getenv("CROSSINK_SIMULATOR_SMOKE_BOOK") != nullptr;
         const bool readable = shelf.open(library::libraryIndexPath());
         const bool populated = readable && (!hasFixture || shelf.bookCount() > 0);
+        const uint16_t books = shelf.bookCount();
         shelf.close();
         if (!populated) fail("Library did not publish a readable populated index");
+        constexpr char REFRESH_FIXTURE[] = "/books/library-refresh-smoke.txt";
+        if (library::libraryIndexNeedsRefresh()) fail("Successful Library scan stayed dirty");
+        if (libraryRefreshPass == 0) {
+          libraryBaselineBooks = books;
+          // Deliberately bypass invalidation to prove that a normal return visit
+          // reuses the index instead of walking the card again.
+          if (!Storage.writeFile(REFRESH_FIXTURE, "Library refresh smoke fixture"))
+            fail("Cannot create Library fixture");
+        } else if (libraryRefreshPass == 1) {
+          if (books != libraryBaselineBooks) fail("Library rescanned an unchanged session");
+          library::invalidateLibraryIndex();
+        } else if (libraryRefreshPass == 2) {
+          if (books != libraryBaselineBooks + 1) fail("Library missed an invalidated addition");
+          if (!Storage.remove(REFRESH_FIXTURE)) fail("Cannot delete Library fixture");
+          library::invalidateLibraryIndex();
+        } else if (books != libraryBaselineBooks) {
+          fail("Library missed an invalidated deletion");
+        }
+        if (libraryRefreshPass++ < 3) {
+          activityManager.goToLibrary();
+          queueStep("Library cache reuse and invalidation", SmokeStep::Library);
+          break;
+        }
+        LOG_INF("SMOKE", "Library reuse, addition and deletion refresh passed");
         if (mappedInputManager.hasHomeKey()) {
           renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
         }
@@ -757,14 +1025,30 @@ class SimulatorSmokeTest {
 
       case SmokeStep::Settings:
         renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+        if (!mappedInputManager.hasTouchHardware()) {
+          inputScript.clear();
+          scriptIndex = 0;
+          inputCompletionStep = SmokeStep::SideButtons;
+          addTap(MappedInputManager::Button::Confirm);  // Reader tab
+          addTap(MappedInputManager::Button::Confirm);  // Controls tab
+          addTap(MappedInputManager::Button::Down);     // Power Button
+          addTap(MappedInputManager::Button::Down);     // Front Buttons
+          addTap(MappedInputManager::Button::Down);     // Side Buttons
+          addTap(MappedInputManager::Button::Confirm);
+          inputScript.push_back(render("Side Button Settings", 250));
+          step = SmokeStep::ReaderInput;
+          break;
+        }
+        [[fallthrough]];
+      case SmokeStep::SideButtons:
         activityManager.replaceActivity(std::make_unique<ReaderOptionsActivity>(renderer, mappedInputManager));
         queueStep("Reader Options", SmokeStep::ReaderOptions);
         break;
 
       case SmokeStep::ReaderOptions:
-        activityManager.replaceActivity(
-            std::make_unique<EpubReaderMenuActivity>(renderer, mappedInputManager, "Smoke Test", 1, 1, 0,
-                                                     SETTINGS.orientation, false, false, false, false, false, false));
+        activityManager.replaceActivity(std::make_unique<EpubReaderDrawerActivity>(
+            renderer, mappedInputManager, std::shared_ptr<Epub>{}, nullptr, 0.0f, 0, 0, false, false, false, false,
+            false, false, false, false, true, true, 0, 0, 5, false));
         queueStep("Reader Menu", SmokeStep::ReaderMenu);
         break;
 
@@ -914,7 +1198,7 @@ class SimulatorSmokeTest {
         inputScript.push_back(touchMove(width / 2, height * 3 / 4));
         inputScript.push_back(touchRelease(width / 2, height * 3 / 4));
         inputScript.push_back(render("Reader Menu opened for TTF Native transition", 4));
-        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(assertActivity("EpubReaderDrawer"));
         inputScript.push_back(touchDown(width / (static_cast<int>(READER_DRAWER_TAB_COUNT) * 2), tabY));
         inputScript.push_back(touchRelease(width / (static_cast<int>(READER_DRAWER_TAB_COUNT) * 2), tabY));
         addTap(MappedInputManager::Button::Confirm);
@@ -922,7 +1206,7 @@ class SimulatorSmokeTest {
         addTap(MappedInputManager::Button::Down);
         addTap(MappedInputManager::Button::Confirm);
         inputScript.push_back(render("TTF Rendering opened in reader drawer", 4));
-        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(assertActivity("EpubReaderDrawer"));
         addTap(MappedInputManager::Button::Confirm);
         inputScript.push_back(render("TTF Hinting choices opened in reader drawer", 3));
         addTap(MappedInputManager::Button::Down);
@@ -932,7 +1216,7 @@ class SimulatorSmokeTest {
         inputScript.push_back(touchDown(width / 2, tabY));
         inputScript.push_back(touchRelease(width / 2, tabY));
         inputScript.push_back(render("Reader Menu tab changed after TTF Native selection", 5));
-        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(assertActivity("EpubReaderDrawer"));
         addTap(MappedInputManager::Button::Back);
         inputScript.push_back(render("Reader restored after TTF Native selection", 10));
         inputScript.push_back(assertActivity("EpubReader"));
@@ -983,9 +1267,8 @@ class SimulatorSmokeTest {
         inputScript.push_back(touchRelease(20, 8));
         inputScript.push_back(render("Frontlight Panel remains open after in-drawer swipe up", 4));
         inputScript.push_back(assertActivity("FrontlightPanel"));
-        // X4 Pro's portrait frontlight sheet ends just below mid-screen; this
-        // point lands in its centered 29 px handle band.
-        inputScript.push_back(touchDown(width / 2, height * 21 / 40));
+        // The book-progress row puts the portrait sheet's handle near 58% height.
+        inputScript.push_back(touchDown(width / 2, height * 23 / 40));
         inputScript.push_back(touchMove(width / 2, 8));
         inputScript.push_back(touchRelease(width / 2, 8));
         inputScript.push_back(render("Reader restored after Frontlight Panel handle drag up", 4));
@@ -997,8 +1280,8 @@ class SimulatorSmokeTest {
         inputScript.push_back(assertActivity("FrontlightPanel"));
         // The fourth action-bar slot opens Global Settings through the real
         // FrontlightPanelActivity callback path.
-        inputScript.push_back(touchDown(width * 7 / 10, height * 15 / 32));
-        inputScript.push_back(touchRelease(width * 7 / 10, height * 15 / 32));
+        inputScript.push_back(touchDown(width * 7 / 10, height * 21 / 40));
+        inputScript.push_back(touchRelease(width * 7 / 10, height * 21 / 40));
         inputScript.push_back(render("Global Settings opened from Frontlight Panel", 4));
         inputScript.push_back(assertActivity("Settings"));
         inputScript.push_back(touchDown(width / 2, height * 3 / 4));
@@ -1016,8 +1299,8 @@ class SimulatorSmokeTest {
         inputScript.push_back(touchRelease(width / 2, height / 4));
         inputScript.push_back(render("Frontlight Panel reopened after Global Settings", 4));
         inputScript.push_back(assertActivity("FrontlightPanel"));
-        inputScript.push_back(touchDown(width * 3 / 10, height * 3 / 8));
-        inputScript.push_back(touchRelease(width * 3 / 10, height * 3 / 8));
+        inputScript.push_back(touchDown(width * 3 / 10, height * 21 / 40));
+        inputScript.push_back(touchRelease(width * 3 / 10, height * 21 / 40));
         inputScript.push_back(render("Sync dialog opened from Frontlight Panel", 4));
         inputScript.push_back(assertActivity("FrontlightPanel"));
         inputScript.push_back(touchDown(width / 2, height - 60));
@@ -1026,25 +1309,25 @@ class SimulatorSmokeTest {
         inputScript.push_back(assertActivity("EpubReader"));
         inputScript.push_back(homeLongPress());
         inputScript.push_back(render("Reader Menu opened from simulated Home key hold", 4));
-        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(assertActivity("EpubReaderDrawer"));
         inputScript.push_back(touchDown(width / 2, height / 2 + 24));
         inputScript.push_back(touchRelease(width / 2, height / 2 + 24));
         inputScript.push_back(render("Reader Font opened from touch reader menu", 4));
-        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(assertActivity("EpubReaderDrawer"));
         inputScript.push_back(homeTap());
         inputScript.push_back(render("Reader Menu root restored by simulated Home key tap", 8));
-        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(assertActivity("EpubReaderDrawer"));
         inputScript.push_back(homeTap());
         inputScript.push_back(render("Reader restored by simulated Home key tap at drawer root", 8));
         inputScript.push_back(assertActivity("EpubReader"));
         inputScript.push_back(homeLongPress());
         inputScript.push_back(render("Reader Menu reopened from simulated Home key hold", 4));
-        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(assertActivity("EpubReaderDrawer"));
         inputScript.push_back(touchDown(width / 2, height * 3 / 4));
         inputScript.push_back(touchMove(width / 2, height - 8));
         inputScript.push_back(touchRelease(width / 2, height - 8));
         inputScript.push_back(render("Reader Menu remains open after in-drawer swipe down", 4));
-        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(assertActivity("EpubReaderDrawer"));
         inputScript.push_back(touchDown(width / 2, height / 2 - 14));
         inputScript.push_back(touchMove(width / 2, height - 8));
         inputScript.push_back(touchRelease(width / 2, height - 8));
@@ -1053,7 +1336,7 @@ class SimulatorSmokeTest {
         inputScript.push_back(disableReaderTouch());
         inputScript.push_back(homeLongPress());
         inputScript.push_back(render("Reader Menu opened from Home key hold with touch disabled", 4));
-        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(assertActivity("EpubReaderDrawer"));
         inputScript.push_back(touchDown(width / 2, height / 4));
         inputScript.push_back(touchRelease(width / 2, height / 4));
         inputScript.push_back(render("Reader restored after Home key menu with touch disabled", 4));
@@ -1090,7 +1373,7 @@ class SimulatorSmokeTest {
         inputScript.push_back(touchRelease(width / 2, height * 3 / 4));
       }
       inputScript.push_back(render("Reader Menu opened from touch gesture", 4));
-      inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+      inputScript.push_back(assertActivity("EpubReaderDrawer"));
 
       // Touch every bottom-drawer tab slot, then dismiss from its handle.
       for (int tab = 0; tab < static_cast<int>(READER_DRAWER_TAB_COUNT); ++tab) {
@@ -1098,7 +1381,7 @@ class SimulatorSmokeTest {
         inputScript.push_back(touchDown(tabX, tabY));
         inputScript.push_back(touchRelease(tabX, tabY));
         inputScript.push_back(render("Touch Reader Menu tab", 3));
-        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(assertActivity("EpubReaderDrawer"));
       }
 
       const int moreTabX = width / 2;
@@ -1111,14 +1394,14 @@ class SimulatorSmokeTest {
       inputScript.push_back(touchDown(width / 2, drawerTop + rootRowStep + rootRowCenterOffset));
       inputScript.push_back(touchRelease(width / 2, drawerTop + rootRowStep + rootRowCenterOffset));
       inputScript.push_back(render("Touch Reader Go to Percent pane", 4));
-      inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+      inputScript.push_back(assertActivity("EpubReaderDrawer"));
       inputScript.push_back(touchDown(20, drawerTop + 26));
       inputScript.push_back(touchRelease(20, drawerTop + 26));
       inputScript.push_back(render("Touch Reader More tab restored", 3));
       inputScript.push_back(touchDown(width / 2, drawerTop + rootRowStep * 2 + rootRowCenterOffset));
       inputScript.push_back(touchRelease(width / 2, drawerTop + rootRowStep * 2 + rootRowCenterOffset));
       inputScript.push_back(render("Touch Reader Auto Page Turn pane", 4));
-      inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+      inputScript.push_back(assertActivity("EpubReaderDrawer"));
       inputScript.push_back(touchDown(20, drawerTop + 26));
       inputScript.push_back(touchRelease(20, drawerTop + 26));
       inputScript.push_back(render("Touch Reader More tab restored", 3));
@@ -1126,7 +1409,7 @@ class SimulatorSmokeTest {
       inputScript.push_back(touchMove(width / 2, height - 8));
       inputScript.push_back(touchRelease(width / 2, height - 8));
       inputScript.push_back(render("Reader Menu remains open after in-drawer swipe down", 4));
-      inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+      inputScript.push_back(assertActivity("EpubReaderDrawer"));
       inputScript.push_back(touchDown(width / 2, drawerTop - 14));
       inputScript.push_back(touchRelease(width / 2, drawerTop - 14));
       inputScript.push_back(render("Reader restored after drawer handle tap", 4));
@@ -1136,12 +1419,12 @@ class SimulatorSmokeTest {
       inputScript.push_back(touchMove(width / 2, height * 3 / 4));
       inputScript.push_back(touchRelease(width / 2, height * 3 / 4));
       inputScript.push_back(render("Reader Menu reopened for bottom-edge Home gesture", 4));
-      inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+      inputScript.push_back(assertActivity("EpubReaderDrawer"));
       inputScript.push_back(touchDown(width / 2, height * 3 / 4));
       inputScript.push_back(touchMove(width / 2, height / 2 + 8));
       inputScript.push_back(touchRelease(width / 2, height / 2 + 8));
       inputScript.push_back(render("Reader Menu remains open after interior swipe up", 4));
-      inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+      inputScript.push_back(assertActivity("EpubReaderDrawer"));
       inputScript.push_back(touchDown(width / 2, height - 8));
       inputScript.push_back(touchMove(width / 2, height * 3 / 4));
       inputScript.push_back(touchRelease(width / 2, height * 3 / 4));
@@ -1159,19 +1442,77 @@ class SimulatorSmokeTest {
     inputScript.push_back(render("Reader Menu opened from EPUB", 4));
 
     addTap(MappedInputManager::Button::Down);
-    inputScript.push_back(render("Reader Menu Reader Options selection", 3));
+    inputScript.push_back(render("Reader Menu first row focused", 3));
 
     addTap(MappedInputManager::Button::Confirm);
-    inputScript.push_back(render("Reader Options opened from Reader Menu", 4));
+    inputScript.push_back(render("Reader Font opened from Reader Menu", 4));
 
     addTap(MappedInputManager::Button::Down);
-    inputScript.push_back(render("Reader Options after navigation", 3));
+    inputScript.push_back(render("Font Size selected", 3));
 
     addTap(MappedInputManager::Button::Confirm);
-    inputScript.push_back(render("Reader Options after toggle", 3));
+    inputScript.push_back(render("Font Size choices opened", 3));
+
+#if CROSSINK_APP_READER_SAMPLE_PREVIEW
+    addTap(MappedInputManager::Button::Down);
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("C3 font size paragraph preview", 4));
+#endif
 
     addTap(MappedInputManager::Button::Back);
-    inputScript.push_back(render("Reader Menu after closing Reader Options", 4));
+    inputScript.push_back(render("Reader Font after closing Font Size", 4));
+
+#if CROSSINK_APP_READER_SAMPLE_PREVIEW
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("C3 font family picker", 4));
+    addTap(MappedInputManager::Button::Down);
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("C3 font family paragraph preview", 4));
+    addTap(MappedInputManager::Button::Back);
+    inputScript.push_back(render("C3 reader font restored", 3));
+#endif
+
+    addTap(MappedInputManager::Button::Back);
+    inputScript.push_back(render("Reader Menu tab focus restored", 4));
+
+#if CROSSINK_APP_READER_SAMPLE_PREVIEW
+    addTap(MappedInputManager::Button::Down);
+    addTap(MappedInputManager::Button::Down);
+    addTap(MappedInputManager::Button::Down);
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("C3 spacing paragraph preview", 4));
+    addTap(MappedInputManager::Button::Confirm);
+    addTap(MappedInputManager::Button::Down);
+    inputScript.push_back(render("C3 line spacing adjusted", 4));
+    addTap(MappedInputManager::Button::Back);
+    addTap(MappedInputManager::Button::Down);
+    addTap(MappedInputManager::Button::Confirm);
+    addTap(MappedInputManager::Button::Down);
+    inputScript.push_back(render("C3 word spacing adjusted", 4));
+    addTap(MappedInputManager::Button::Back);
+    addTap(MappedInputManager::Button::Back);
+    inputScript.push_back(render("C3 font tab restored", 3));
+#endif
+
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("Reader Menu advanced to next tab", 4));
+
+#if CROSSINK_APP_READER_SAMPLE_PREVIEW
+    addTap(MappedInputManager::Button::Down);
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("C3 margin paragraph preview", 4));
+    addTap(MappedInputManager::Button::Confirm);
+    addTap(MappedInputManager::Button::Down);
+    inputScript.push_back(render("C3 vertical margin adjusted", 4));
+    addTap(MappedInputManager::Button::Back);
+    addTap(MappedInputManager::Button::Down);
+    addTap(MappedInputManager::Button::Confirm);
+    addTap(MappedInputManager::Button::Down);
+    inputScript.push_back(render("C3 horizontal margin adjusted", 4));
+    addTap(MappedInputManager::Button::Back);
+    addTap(MappedInputManager::Button::Back);
+    inputScript.push_back(render("C3 layout tab restored", 3));
+#endif
 
     addTap(MappedInputManager::Button::Back);
     inputScript.push_back(render("Reader after closing Reader Menu", 4));

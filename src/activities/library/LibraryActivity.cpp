@@ -1,6 +1,10 @@
 #include "LibraryActivity.h"
 
 #include <Arduino.h>
+#include <Bitmap.h>
+#include <DateFormatting.h>
+#include <Epub.h>
+#include <FsHelpers.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <LibraryBuilder.h>
@@ -17,6 +21,7 @@
 
 #include "activities/home/BookActions.h"
 #include "activities/home/FileBrowserActionActivity.h"
+#include "activities/home/RecentBookProgress.h"
 #include "activities/library/LibrarySettingsActivity.h"
 #include "activities/reader/BookReadingStats.h"
 #include "activities/reader/EpubReaderActivity.h"
@@ -38,6 +43,31 @@ constexpr unsigned long LONG_PRESS_MS = 1000;
 constexpr unsigned long ACTION_FEEDBACK_MS = 1000;
 constexpr int HEADER_CONTROL_SIZE = 44;
 constexpr int HEADER_CONTROL_GAP = 10;
+constexpr int FOOTER_HEIGHT = 28;
+constexpr int GRID_COLUMNS = 3;
+constexpr int GRID_PAGE_SIZE = 9;
+constexpr int GRID_GAP = 8;
+constexpr int GRID_SELECTION_PADDING = 4;
+constexpr int GRID_SELECTION_OUTLINE_GAP = 2;
+constexpr int GRID_SELECTION_OUTER_INSET = GRID_SELECTION_PADDING + GRID_SELECTION_OUTLINE_GAP;
+constexpr int GRID_COVER_CORNER_RADIUS = 2;
+
+const RecentBook* recentBookForPath(const std::string& path) {
+  const auto& books = RECENT_BOOKS.getBooks();
+  const auto it =
+      std::find_if(books.begin(), books.end(), [&path](const RecentBook& book) { return book.path == path; });
+  return it == books.end() ? nullptr : &*it;
+}
+
+bool hasValidGridThumb(const std::string& path, const int width, const int height) {
+  FsFile file;
+  if (path.empty() || !Storage.exists(path.c_str()) || !Storage.openFileForRead("LIB", path, file)) return false;
+  Bitmap bitmap(file);
+  const bool valid =
+      bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getWidth() == width && bitmap.getHeight() == height;
+  file.close();
+  return valid;
+}
 
 int headerControlRightInset() {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -55,6 +85,10 @@ void LibraryActivity::onEnter() {
   {
     RenderLock lock;
     Activity::onEnter();
+    renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+    // The activity can be constructed while a landscape reader is still active.
+    // Refresh FreeInkUI's captured screen size and safe area after rotating.
+    app.setDevice(uiTarget.deviceContext());
     if (RECENT_BOOKS.pruneMissing()) RECENT_BOOKS.saveToFile();
     applySharedUiTheme(app, uiTarget);
     seriesScratch.reserve(128);
@@ -67,10 +101,12 @@ void LibraryActivity::onEnter() {
     app.on(ACTION_ROW, &LibraryActivity::onRowEvent, this);
     app.on(ACTION_CONTROL, &LibraryActivity::onControlEvent, this);
     app.setScreen(&LibraryActivity::listScreen, this);
-    initialScanPending = !Storage.exists(library::libraryIndexPath());
+    // The index survives a firmware reflash, but its first boot reconciliation
+    // can still take time. Show feedback whenever that scan is due.
+    initialScanPending = library::libraryIndexNeedsRefresh() || !Storage.exists(library::libraryIndexPath());
   }
 
-  // Paint the first-scan message before the main task starts reading the card.
+  // Paint the scan message before the main task starts reading the card.
   // The render task normally paints only after onEnter() returns.
   if (initialScanPending && requestUpdateAndWait() != RequestUpdateResult::Rendered) {
     RenderLock lock;
@@ -80,9 +116,7 @@ void LibraryActivity::onEnter() {
 
   {
     RenderLock lock;
-    // Reconcile on entry as card contents may change through USB, Wi-Fi or an
-    // external card reader. Unchanged books reuse the index's metadata.
-    rebuildIndex(false);
+    refreshIndexIfNeeded();
     initialScanPending = false;
     resetViewport();
     ignoreConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
@@ -94,6 +128,20 @@ void LibraryActivity::onExit() {
   index.close();
   filtered.reset();
   Activity::onExit();
+}
+
+void LibraryActivity::refreshIndexIfNeeded() {
+  // Reuse the index across ordinary visits; still reconcile once per boot, after
+  // file changes, and when the format or metadata setting no longer matches.
+  if (library::libraryIndexNeedsRefresh() || (!index.isOpen() && !index.open(library::libraryIndexPath())) ||
+      index.header().metadataEnabled != static_cast<uint8_t>(SETTINGS.libraryUseMetadata != 0)) {
+    rebuildIndex(false);
+    return;
+  }
+  scanFailed = false;
+  uiReady = false;
+  resolveRecents();
+  applyFilter();
 }
 
 bool LibraryActivity::rebuildIndex(const bool showScanning) {
@@ -200,6 +248,27 @@ int LibraryActivity::rowCount() const {
   if (hasActiveFilter()) return filteredCount;
   if (sort == Sort::RecentlyRead) return static_cast<int>(recentCount);
   return index.bookCount();
+}
+
+bool LibraryActivity::gridEnabled() const {
+  return sort == Sort::RecentlyRead && SETTINGS.recentBooksView == CrossPointSettings::RECENT_BOOKS_GRID;
+}
+
+void LibraryActivity::loadGridProgress() {
+  const int row = selection - CONTROL_COUNT;
+  if (!gridEnabled() || row < 0 || row >= rowCount()) {
+    gridProgressRow = -1;
+    gridProgress = -1.0f;
+    return;
+  }
+  if (gridProgressRow == row) return;
+  gridProgressRow = row;
+  gridProgress = -1.0f;
+  RecentBook book;
+  if (readBook(row, book)) {
+    gridProgress = FsHelpers::hasEpubExtension(book.path) ? RecentBookProgress::loadCachedEpubPercent(book)
+                                                          : RecentBookProgress::loadPercent(book);
+  }
 }
 
 uint16_t LibraryActivity::ordinalForRow(const int row) {
@@ -338,20 +407,30 @@ void LibraryActivity::applyFilter() {
 }
 
 void LibraryActivity::resetViewport() {
-  selection = rowCount() ? CONTROL_COUNT : 3;
+  selection = rowCount() || !mappedInput.hasTouchHardware() ? CONTROL_COUNT : 3;
   showSelection = !mappedInput.hasTouchHardware();
   topIndex = 0;
+  gridPageStart = 0;
+  loadedGridPageStart = -1;
+  nextGridCoverRow = -1;
+  gridProgressRow = -1;
   listNav.reset(selection - CONTROL_COUNT);
   uiReady = false;
+  loadGridProgress();
 }
 
 void LibraryActivity::reloadAfterBookAction() {
-  rebuildIndex(false);
+  refreshIndexIfNeeded();
   selection = std::min(selection, std::max(CONTROL_COUNT, CONTROL_COUNT + rowCount() - 1));
   listNav.selected = selection - CONTROL_COUNT;
   listNav.top = topIndex;
   listNav.follow(rowCount());
   topIndex = listNav.top;
+  gridPageStart = ((selection - CONTROL_COUNT) / GRID_PAGE_SIZE) * GRID_PAGE_SIZE;
+  loadedGridPageStart = -1;
+  nextGridCoverRow = -1;
+  gridProgressRow = -1;
+  loadGridProgress();
   requestUpdate();
 }
 
@@ -379,7 +458,7 @@ void LibraryActivity::openBook(const int row) {
   onSelectBook(book.path);
 }
 
-void LibraryActivity::openSortPicker() {
+void LibraryActivity::openSortPicker(const int selectedIndex) {
   static constexpr StrId choices[] = {StrId::STR_LIBRARY_DATE_ADDED,
                                       StrId::STR_LIBRARY_TITLE,
                                       StrId::STR_LIBRARY_AUTHOR_LAST_NAME,
@@ -387,19 +466,46 @@ void LibraryActivity::openSortPicker() {
                                       StrId::STR_LIBRARY_RECENTLY_OPENED,
                                       StrId::STR_LIBRARY_SERIES,
                                       StrId::STR_LIBRARY_GENRE};
-  sortPopup.setDismissOnOutsideTouchDown(true);
-  sortPopup.show(StrId::STR_LIBRARY_SORT_BY, choices, 7, static_cast<int>(sort), [this](const int selected) {
-    if (selected < 0 || selected > static_cast<int>(Sort::Genre)) return;
-    sort = static_cast<Sort>(selected);
-    descending = sort == Sort::DateAdded || sort == Sort::RecentlyRead;
+  const bool buttonOnly = !mappedInput.hasTouchHardware();
+  auto onSelect = [this, buttonOnly](const int selected) {
+    if (buttonOnly && selected == 0) {
+      descending = !descending;
+    } else {
+      const int method = selected - (buttonOnly ? 1 : 0);
+      if (method < 0 || method > static_cast<int>(Sort::Genre)) return;
+      sort = static_cast<Sort>(method);
+      if (!buttonOnly) descending = sort == Sort::DateAdded || sort == Sort::RecentlyRead;
+    }
     SETTINGS.librarySortMethod = static_cast<uint8_t>(sort);
     SETTINGS.librarySortDescending = descending;
     if (!SETTINGS.saveToFile()) LOG_ERR("LIB", "Cannot save Library sort");
     applyFilter();
     resetViewport();
-  });
+    if (buttonOnly && selected == 0) openSortPicker(0);
+  };
+  actionPopup.setDismissOnOutsideTouchDown(true);
+  if (buttonOnly) {
+    const char* options[] = {descending ? "Z-A" : "A-Z", I18N.get(choices[0]), I18N.get(choices[1]),
+                             I18N.get(choices[2]),       I18N.get(choices[3]), I18N.get(choices[4]),
+                             I18N.get(choices[5]),       I18N.get(choices[6])};
+    actionPopup.show(tr(STR_LIBRARY_SORT_BY), options, 8, selectedIndex < 0 ? 0 : selectedIndex, std::move(onSelect));
+    actionPopup.setDividerAfterOption(0);
+  } else {
+    actionPopup.show(StrId::STR_LIBRARY_SORT_BY, choices, 7, static_cast<int>(sort), std::move(onSelect));
+  }
   if (index.isOpen() && index.header().formatVersion < 4)
-    sortPopup.setDisabledOptions({false, false, false, false, false, true, true});
+    actionPopup.setDisabledOptions(buttonOnly ? std::vector<bool>{false, false, false, false, false, false, true, true}
+                                              : std::vector<bool>{false, false, false, false, false, true, true});
+  requestUpdate();
+}
+
+void LibraryActivity::openMenu() {
+  static constexpr StrId choices[] = {StrId::STR_SEARCH, StrId::STR_SETTINGS_SHORT, StrId::STR_LIBRARY_RESCAN};
+  actionPopup.show(StrId::STR_MENU, choices, 3, 0, [this](const int selected) {
+    if (selected == 0) openSearch();
+    if (selected == 1) openSettings();
+    if (selected == 2) refreshLibrary();
+  });
   requestUpdate();
 }
 
@@ -446,6 +552,7 @@ void LibraryActivity::activateControl(const int control) {
     if (!SETTINGS.saveToFile()) LOG_ERR("LIB", "Cannot save Library sort direction");
     applyFilter();
     topIndex = 0;
+    if (gridEnabled()) resetViewport();
     requestUpdate();
   }
 }
@@ -470,8 +577,8 @@ void LibraryActivity::onControlEvent(const fui::ActionEvent& event, void* user) 
 
 void LibraryActivity::loop() {
   RenderLock lock;
-  if (sortPopup.isActive()) {
-    sortPopup.handleInput(mappedInput, [this] { requestUpdate(); });
+  if (actionPopup.isActive()) {
+    actionPopup.handleInput(mappedInput, [this] { requestUpdate(); });
     return;
   }
   if (pendingCacheDeletedFeedback && millis() - cacheDeletedFeedbackShowTime >= ACTION_FEEDBACK_MS) {
@@ -512,7 +619,7 @@ void LibraryActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (selection < CONTROL_COUNT)
       activateControl(selection);
-    else
+    else if (rowCount() > 0)
       openBook(selection - CONTROL_COUNT);
     return;
   }
@@ -527,24 +634,58 @@ void LibraryActivity::loop() {
     return;
   }
   const auto swipe = mappedInput.wasSwipe();
-  if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
+  if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down ||
+      (gridEnabled() &&
+       (swipe == MappedInputManager::SwipeDir::Left || swipe == MappedInputManager::SwipeDir::Right))) {
     if (mappedInput.hasTouchHardware()) showSelection = false;
-    listNav.top = topIndex;
-    const int page = listNav.pageRowsFor(rowCount());
-    listNav.scrollBy(swipe == MappedInputManager::SwipeDir::Up ? page : -page, rowCount());
-    topIndex = listNav.top;
+    if (gridEnabled()) {
+      const int lastPage = rowCount() > 0 ? ((rowCount() - 1) / GRID_PAGE_SIZE) * GRID_PAGE_SIZE : 0;
+      const bool nextPage = swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Left;
+      gridPageStart = std::clamp(gridPageStart + (nextPage ? GRID_PAGE_SIZE : -GRID_PAGE_SIZE), 0, lastPage);
+      if (rowCount() > 0) selection = CONTROL_COUNT + gridPageStart;
+      loadedGridPageStart = -1;
+      nextGridCoverRow = -1;
+      gridProgressRow = -1;
+      loadGridProgress();
+    } else {
+      listNav.top = topIndex;
+      const int page = listNav.pageRowsFor(rowCount());
+      listNav.scrollBy(swipe == MappedInputManager::SwipeDir::Up ? page : -page, rowCount());
+      topIndex = listNav.top;
+    }
     requestUpdate();
     return;
+  }
+  if (!mappedInput.hasTouchHardware()) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+      openSortPicker();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+      openMenu();
+      return;
+    }
   }
   const int count = rowCount() + CONTROL_COUNT;
   const auto move = [this](const int next) {
     if (!showSelection) {
       showSelection = true;
+      loadGridProgress();
       requestUpdate();
       return;
     }
     selection = next;
-    if (selection >= CONTROL_COUNT) {
+    if (gridEnabled()) {
+      if (selection >= CONTROL_COUNT) {
+        const int nextPage = ((selection - CONTROL_COUNT) / GRID_PAGE_SIZE) * GRID_PAGE_SIZE;
+        if (nextPage != gridPageStart) {
+          loadedGridPageStart = -1;
+          nextGridCoverRow = -1;
+        }
+        gridPageStart = nextPage;
+      }
+      loadGridProgress();
+    } else if (selection >= CONTROL_COUNT) {
       listNav.selected = selection - CONTROL_COUNT;
       listNav.top = topIndex;
       listNav.follow(rowCount());
@@ -552,12 +693,36 @@ void LibraryActivity::loop() {
     }
     requestUpdate();
   };
-  buttonNavigator.onNextRelease([&] { move(ButtonNavigator::nextIndex(selection, count)); });
-  buttonNavigator.onPreviousRelease([&] { move(ButtonNavigator::previousIndex(selection, count)); });
-  buttonNavigator.onNextContinuous(
-      [&] { move(ButtonNavigator::nextPageIndex(selection, count, listNav.pageRowsFor(rowCount()))); });
-  buttonNavigator.onPreviousContinuous(
-      [&] { move(ButtonNavigator::previousPageIndex(selection, count, listNav.pageRowsFor(rowCount()))); });
+  if (mappedInput.hasTouchHardware()) {
+    buttonNavigator.onNextRelease([&] { move(ButtonNavigator::nextIndex(selection, count)); });
+    buttonNavigator.onPreviousRelease([&] { move(ButtonNavigator::previousIndex(selection, count)); });
+    buttonNavigator.onNextContinuous([&] {
+      move(ButtonNavigator::nextPageIndex(selection, count,
+                                          gridEnabled() ? GRID_PAGE_SIZE : listNav.pageRowsFor(rowCount())));
+    });
+    buttonNavigator.onPreviousContinuous([&] {
+      move(ButtonNavigator::previousPageIndex(selection, count,
+                                              gridEnabled() ? GRID_PAGE_SIZE : listNav.pageRowsFor(rowCount())));
+    });
+  } else if (rowCount() > 0) {
+    const int bookCount = rowCount();
+    const auto moveBook = [&](const int row) { move(CONTROL_COUNT + row); };
+    buttonNavigator.onRelease({MappedInputManager::Button::Down, MappedInputManager::Button::Down},
+                              [&] { moveBook(ButtonNavigator::nextIndex(selection - CONTROL_COUNT, bookCount)); });
+    buttonNavigator.onRelease({MappedInputManager::Button::Up, MappedInputManager::Button::Up},
+                              [&] { moveBook(ButtonNavigator::previousIndex(selection - CONTROL_COUNT, bookCount)); });
+    buttonNavigator.onContinuous({MappedInputManager::Button::Down, MappedInputManager::Button::Down}, [&] {
+      moveBook(ButtonNavigator::nextPageIndex(selection - CONTROL_COUNT, bookCount,
+                                              gridEnabled() ? GRID_PAGE_SIZE : listNav.pageRowsFor(bookCount)));
+    });
+    buttonNavigator.onContinuous({MappedInputManager::Button::Up, MappedInputManager::Button::Up}, [&] {
+      moveBook(ButtonNavigator::previousPageIndex(selection - CONTROL_COUNT, bookCount,
+                                                  gridEnabled() ? GRID_PAGE_SIZE : listNav.pageRowsFor(bookCount)));
+    });
+  }
+  // Prepare at most one visible cover per turn, leaving an input check between
+  // EPUB parses. Redraw as each thumbnail becomes available.
+  loadGridPageCovers();
 }
 
 void LibraryActivity::listScreen(UiApp::ScreenType& screen, void* user) {
@@ -605,9 +770,14 @@ void LibraryActivity::provideRow(void* user, const uint16_t row, fui::ListItem& 
       if (date == 0) {
         self->groupHeading = "?";
       } else {
-        char heading[11];
-        std::snprintf(heading, sizeof(heading), "%04u-%02u-%02u", 1980u + (date >> 9), (date >> 5) & 15u, date & 31u);
-        self->groupHeading = heading;
+        char heading[20];
+        const char separator = SETTINGS.dateSeparator == CrossPointSettings::DATE_SEPARATOR_PERIOD   ? '.'
+                               : SETTINGS.dateSeparator == CrossPointSettings::DATE_SEPARATOR_HYPHEN ? '-'
+                                                                                                     : '/';
+        self->groupHeading = formatDateParts(heading, sizeof(heading), 1980u + (date >> 9), (date >> 5) & 15u,
+                                             date & 31u, SETTINGS.dateFormat, separator)
+                                 ? heading
+                                 : "?";
       }
       item.sectionHeading = self->groupHeading.c_str();
     }
@@ -671,7 +841,7 @@ uint32_t LibraryActivity::groupForRow(const int row) {
 void LibraryActivity::buildSortHeader(UiApp::ScreenType& screen) {
   const int16_t bandHeight = std::max<int16_t>(44, screen.theme().rowHeight);
   const auto band = screen.take(fui::LayoutAnchor::Top, bandHeight);
-  const int16_t margin = 10;
+  const int16_t margin = UITheme::getInstance().getMetrics().contentSidePadding;
   auto labelStyle = screen.theme().bodyText;
   labelStyle.bold = true;
   const int16_t labelWidth = std::min<int16_t>(
@@ -695,17 +865,21 @@ void LibraryActivity::buildSortHeader(UiApp::ScreenType& screen) {
   button.text = screen.theme().bodyText;
   button.styles = fui::plainStyles();
   button.styles.selected = screen.theme().button.selected;
-  button.state = showSelection && selection == 3 ? fui::StateSelected : fui::StateNormal;
+  button.state =
+      mappedInput.hasTouchHardware() && showSelection && selection == 3 ? fui::StateSelected : fui::StateNormal;
   screen.button(button, method);
   button.label = nullptr;
   button.icon = fui::bitmapFromIcon(descending ? icon_arrow_down_wide_narrow_32 : icon_arrow_up_narrow_wide_32);
-  button.state = showSelection && selection == 4 ? fui::StateSelected : fui::StateNormal;
+  button.state =
+      mappedInput.hasTouchHardware() && showSelection && selection == 4 ? fui::StateSelected : fui::StateNormal;
   screen.button(button, direction);
   const int16_t split = static_cast<int16_t>((method.right() + direction.x) / 2);
-  screen.frame().hit(fui::Rect{band.x, band.y, static_cast<int16_t>(split - band.x), band.height}, ACTION_CONTROL, 3,
-                     fui::InputTouch);
-  screen.frame().hit(fui::Rect{split, band.y, static_cast<int16_t>(band.right() - split), band.height}, ACTION_CONTROL,
-                     4, fui::InputTouch);
+  if (mappedInput.hasTouchHardware()) {
+    screen.frame().hit(fui::Rect{band.x, band.y, static_cast<int16_t>(split - band.x), band.height}, ACTION_CONTROL, 3,
+                       fui::InputTouch);
+    screen.frame().hit(fui::Rect{split, band.y, static_cast<int16_t>(band.right() - split), band.height},
+                       ACTION_CONTROL, 4, fui::InputTouch);
+  }
   uiTarget.fill(fui::Rect{band.x, band.y, band.width, 1}, fui::Paint::solid(fui::Color::Black));
   uiTarget.fill(fui::Rect{band.x, static_cast<int16_t>(band.bottom() - 1), band.width, 1},
                 fui::Paint::solid(fui::Color::Black));
@@ -717,39 +891,42 @@ void LibraryActivity::buildListScreen(UiApp::ScreenType& screen) {
   renderer.getOrientedViewableTRBL(&bounds[0], &bounds[1], &bounds[2], &bounds[3]);
   const int16_t headerBottom =
       static_cast<int16_t>(metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput));
+  const int buttonHintsHeight = mappedInput.hasTouchHardware() ? 0 : metrics.buttonHintsHeight;
   screen.setContentMarginFromScreen(fui::Insets{headerBottom, static_cast<int16_t>(bounds[1]),
-                                                static_cast<int16_t>(metrics.buttonHintsHeight + bounds[2]),
+                                                static_cast<int16_t>(FOOTER_HEIGHT + buttonHintsHeight + bounds[2]),
                                                 static_cast<int16_t>(bounds[3])});
   // Every header icon owns a 44px touch box, with 10px of clearance.
   const int16_t controlSize = HEADER_CONTROL_SIZE;
   const auto header = TouchHeaderBackButton::headerRect(renderer, mappedInput);
   const int16_t right = static_cast<int16_t>(renderer.getScreenWidth() - bounds[1] - headerControlRightInset());
-  fui::ButtonProps action;
-  action.action = ACTION_CONTROL;
-  action.inputMask = fui::InputTouch;
-  action.styles = fui::plainStyles();
-  action.styles.selected = screen.theme().button.selected;
-  action.icon = fui::bitmapFromIcon(icon_refresh_cw_32);
-  action.value = 0;
-  action.state = showSelection && selection == 0 ? fui::StateSelected : fui::StateNormal;
-  screen.button(action,
-                fui::Rect{static_cast<int16_t>(right - 3 * controlSize - 2 * HEADER_CONTROL_GAP),
-                          static_cast<int16_t>(header.y + header.height - controlSize), controlSize, controlSize});
-  action.icon = fui::bitmapFromIcon(icon_search_32);
-  action.value = 1;
-  action.state = showSelection && selection == 1 ? fui::StateSelected : fui::StateNormal;
-  screen.button(action,
-                fui::Rect{static_cast<int16_t>(right - 2 * controlSize - HEADER_CONTROL_GAP),
-                          static_cast<int16_t>(header.y + header.height - controlSize), controlSize, controlSize});
-  action.icon = fui::bitmapFromIcon(icon_ellipsis_vertical_32);
-  action.value = 2;
-  action.state = showSelection && selection == 2 ? fui::StateSelected : fui::StateNormal;
-  // Give the small overflow icon a 56px touch target. Keep its bottom edge at
-  // the header boundary so the expanded target cannot steal taps from sorting.
-  if (mappedInput.hasTouchHardware()) action.hitPadding = fui::Insets{12, 6, 0, 6};
-  screen.button(action,
-                fui::Rect{static_cast<int16_t>(right - controlSize),
-                          static_cast<int16_t>(header.y + header.height - controlSize), controlSize, controlSize});
+  if (mappedInput.hasTouchHardware()) {
+    fui::ButtonProps action;
+    action.action = ACTION_CONTROL;
+    action.inputMask = fui::InputTouch;
+    action.styles = fui::plainStyles();
+    action.styles.selected = screen.theme().button.selected;
+    action.icon = fui::bitmapFromIcon(icon_refresh_cw_32);
+    action.value = 0;
+    action.state = showSelection && selection == 0 ? fui::StateSelected : fui::StateNormal;
+    screen.button(action,
+                  fui::Rect{static_cast<int16_t>(right - 3 * controlSize - 2 * HEADER_CONTROL_GAP),
+                            static_cast<int16_t>(header.y + header.height - controlSize), controlSize, controlSize});
+    action.icon = fui::bitmapFromIcon(icon_search_32);
+    action.value = 1;
+    action.state = showSelection && selection == 1 ? fui::StateSelected : fui::StateNormal;
+    screen.button(action,
+                  fui::Rect{static_cast<int16_t>(right - 2 * controlSize - HEADER_CONTROL_GAP),
+                            static_cast<int16_t>(header.y + header.height - controlSize), controlSize, controlSize});
+    action.icon = fui::bitmapFromIcon(icon_ellipsis_vertical_32);
+    action.value = 2;
+    action.state = showSelection && selection == 2 ? fui::StateSelected : fui::StateNormal;
+    // Give the small overflow icon a 56px touch target. Keep its bottom edge at
+    // the header boundary so the expanded target cannot steal taps from sorting.
+    action.hitPadding = fui::Insets{12, 6, 0, 6};
+    screen.button(action,
+                  fui::Rect{static_cast<int16_t>(right - controlSize),
+                            static_cast<int16_t>(header.y + header.height - controlSize), controlSize, controlSize});
+  }
   buildSortHeader(screen);
   if (scanFailed || index.ranksDegraded() || filterFailed) {
     const auto warning = screen.take(fui::LayoutAnchor::Top, uiTarget.lineHeight(screen.theme().smallText.font) + 8);
@@ -775,6 +952,10 @@ void LibraryActivity::buildListScreen(UiApp::ScreenType& screen) {
     }
     return;
   }
+  if (gridEnabled()) {
+    buildGrid(screen);
+    return;
+  }
   fui::ListProps props;
   props.rowProvider = &LibraryActivity::provideRow;
   props.rowProviderCtx = this;
@@ -798,6 +979,165 @@ void LibraryActivity::buildListScreen(UiApp::ScreenType& screen) {
   screen.list(props);
 }
 
+void LibraryActivity::buildGrid(UiApp::ScreenType& screen) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int count = rowCount();
+  const int pageCount = (count + GRID_PAGE_SIZE - 1) / GRID_PAGE_SIZE;
+  const auto title = screen.take(fui::LayoutAnchor::Top,
+                                 static_cast<int16_t>(uiTarget.lineHeight(screen.theme().bodyText.font) + GRID_GAP));
+  fui::Rect pageIndicator{};
+  if (pageCount > 1) pageIndicator = screen.take(fui::LayoutAnchor::Bottom, 16, GRID_GAP);
+  const fui::Rect area = screen.body();
+  const int16_t cellWidth = std::max<int16_t>(1, (area.width - 2 * GRID_GAP) / GRID_COLUMNS);
+  const int16_t cellHeight = std::max<int16_t>(1, (area.height - 2 * GRID_GAP) / GRID_COLUMNS);
+  const int16_t coverHeight =
+      std::max<int16_t>(1, std::min<int16_t>(cellHeight - 2 * GRID_SELECTION_OUTER_INSET,
+                                             (cellWidth - 2 * GRID_SELECTION_OUTER_INSET) * 3 / 2));
+  const int16_t coverWidth =
+      std::max<int16_t>(1, std::min<int16_t>(cellWidth - 2 * GRID_SELECTION_OUTER_INSET, coverHeight * 2 / 3));
+  if (coverWidth != gridCoverWidth || coverHeight != gridCoverHeight) {
+    gridCoverWidth = coverWidth;
+    gridCoverHeight = coverHeight;
+    loadedGridPageStart = -1;
+    nextGridCoverRow = -1;
+  }
+
+  const int selectedRow = selection - CONTROL_COUNT;
+  if (selectedRow >= gridPageStart && selectedRow < gridPageStart + GRID_PAGE_SIZE && selectedRow < count &&
+      readBook(selectedRow, rowScratch)) {
+    const bool hasProgress = gridProgressRow == selectedRow && RecentBookProgress::hasPercent(gridProgress);
+    subtitleScratch.clear();
+    if (hasProgress) subtitleScratch.assign("  ·  ").append(RecentBookProgress::formatPercent(gridProgress));
+    auto style = screen.theme().bodyText;
+    style.maxLines = 1;
+    // Center the whole title row between the sort divider and the first cover.
+    const int16_t coverTop = static_cast<int16_t>(area.y + (cellHeight - coverHeight) / 2);
+    const int16_t bandTop = static_cast<int16_t>(title.y - metrics.verticalSpacing);
+    const fui::Rect titleBand{title.x, bandTop, title.width, static_cast<int16_t>(coverTop - bandTop)};
+    const fui::Rect textBand = titleBand.inset(fui::Insets{0, static_cast<int16_t>(metrics.contentSidePadding), 0,
+                                                           static_cast<int16_t>(metrics.contentSidePadding)});
+    const int16_t suffixWidth =
+        hasProgress ? uiTarget.measureText(style.font, subtitleScratch.c_str(), style).width : 0;
+    const int16_t titleWidth = std::max<int16_t>(0, textBand.width - suffixWidth);
+    const std::string visibleTitle =
+        renderer.truncatedText(uiScaleSpec().bodyFontId, rowScratch.title.c_str(), titleWidth,
+                               style.bold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+    const int16_t drawnTitleWidth = uiTarget.measureText(style.font, visibleTitle.c_str(), style).width;
+    uiTarget.text(fui::Rect{textBand.x, textBand.y, titleWidth, textBand.height}, visibleTitle.c_str(), style);
+    if (hasProgress)
+      uiTarget.text(
+          fui::Rect{static_cast<int16_t>(textBand.x + drawnTitleWidth), textBand.y, suffixWidth, textBand.height},
+          subtitleScratch.c_str(), style);
+  }
+
+  const int visible = std::min(GRID_PAGE_SIZE, count - gridPageStart);
+  for (int slot = 0; slot < visible; ++slot) {
+    const int row = gridPageStart + slot;
+    const int col = slot % GRID_COLUMNS;
+    const int line = slot / GRID_COLUMNS;
+    const fui::Rect cell{static_cast<int16_t>(area.x + col * (cellWidth + GRID_GAP)),
+                         static_cast<int16_t>(area.y + line * (cellHeight + GRID_GAP)), cellWidth, cellHeight};
+    const int16_t x = static_cast<int16_t>(cell.x + (cell.width - coverWidth) / 2);
+    const int16_t y = static_cast<int16_t>(cell.y + (cell.height - coverHeight) / 2);
+    bool drawn = false;
+    const bool available = readBook(row, rowScratch);
+    if (available) {
+      const RecentBook* recent = recentBookForPath(rowScratch.path);
+      if (recent && !recent->coverBmpPath.empty()) {
+        const std::string path = UITheme::getCoverThumbPath(recent->coverBmpPath, coverWidth, coverHeight);
+        if (!path.empty() && Storage.exists(path.c_str())) {
+          FsFile file;
+          if (Storage.openFileForRead("LIB", path, file)) {
+            Bitmap bitmap(file);
+            if (bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getWidth() > 0 && bitmap.getHeight() > 0)
+              drawn = renderer.drawBitmap(bitmap, x, y, coverWidth, coverHeight);
+            file.close();
+          }
+        }
+      }
+    }
+    if (!drawn) {
+      renderer.fillRoundedRect(x, y, coverWidth, coverHeight, GRID_COVER_CORNER_RADIUS, Color::White);
+      if (coverWidth >= 36 && coverHeight >= 36)
+        drawLucideIcon(renderer, icon_book_marked_32, x + (coverWidth - 32) / 2, y + (coverHeight - 32) / 2);
+    }
+    renderer.maskRoundedRectOutsideCorners(x, y, coverWidth, coverHeight, GRID_COVER_CORNER_RADIUS, Color::White);
+    renderer.drawRoundedRect(x, y, coverWidth, coverHeight, 2, GRID_COVER_CORNER_RADIUS, true);
+    if (row == selectedRow) {
+      renderer.drawRoundedRect(x - GRID_SELECTION_PADDING, y - GRID_SELECTION_PADDING,
+                               coverWidth + 2 * GRID_SELECTION_PADDING, coverHeight + 2 * GRID_SELECTION_PADDING, 3,
+                               GRID_COVER_CORNER_RADIUS + GRID_SELECTION_PADDING, true);
+      renderer.drawRoundedRect(
+          x - GRID_SELECTION_OUTER_INSET, y - GRID_SELECTION_OUTER_INSET, coverWidth + 2 * GRID_SELECTION_OUTER_INSET,
+          coverHeight + 2 * GRID_SELECTION_OUTER_INSET, 1, GRID_COVER_CORNER_RADIUS + GRID_SELECTION_OUTER_INSET, true);
+    }
+    if (available)
+      screen.frame().hit(cell, ACTION_ROW, static_cast<int16_t>(row), fui::InputTouch | fui::InputLongPress);
+  }
+
+  if (pageCount > 1) {
+    constexpr int dotSize = 6;
+    constexpr int dotGap = 8;
+    const int dotsWidth = pageCount * dotSize + (pageCount - 1) * dotGap;
+    const int startX = pageIndicator.x + (pageIndicator.width - dotsWidth) / 2;
+    for (int page = 0; page < pageCount; ++page) {
+      const int x = startX + page * (dotSize + dotGap);
+      if (page == gridPageStart / GRID_PAGE_SIZE)
+        renderer.fillRect(x, pageIndicator.y + 4, dotSize, dotSize, true);
+      else
+        renderer.drawRect(x, pageIndicator.y + 4, dotSize, dotSize, true);
+    }
+  }
+}
+
+void LibraryActivity::loadGridPageCovers() {
+  if (!gridEnabled() || gridCoverWidth <= 0 || gridCoverHeight <= 0 || gridPageStart == loadedGridPageStart) return;
+  const int pageEnd = std::min(gridPageStart + GRID_PAGE_SIZE, rowCount());
+  if (nextGridCoverRow < 0) nextGridCoverRow = gridPageStart;
+  if (nextGridCoverRow < pageEnd && loadGridCover(nextGridCoverRow++)) requestUpdate();
+  if (nextGridCoverRow >= pageEnd) {
+    loadedGridPageStart = gridPageStart;
+    nextGridCoverRow = -1;
+  }
+}
+
+bool LibraryActivity::loadGridCover(const int row) {
+  RecentBook book;
+  if (!readBook(row, book)) return false;
+  const RecentBook* recent = recentBookForPath(book.path);
+  if (!recent || recent->coverState == RecentBook::CoverState::Missing) return false;
+  if (!FsHelpers::hasEpubExtension(book.path) && !FsHelpers::hasXtcExtension(book.path)) return false;
+  const std::string thumbPath = UITheme::getCoverThumbPath(recent->coverBmpPath, gridCoverWidth, gridCoverHeight);
+  if (hasValidGridThumb(thumbPath, gridCoverWidth, gridCoverHeight)) return false;
+  if (FsHelpers::hasEpubExtension(book.path)) {
+    Epub epub(book.path, "/.crosspoint");
+    if (!epub.load(true, true, Epub::XLocationLoadMode::Skip)) {
+      LOG_ERR("LIB", "Cannot load EPUB cover for %s", book.path.c_str());
+      return false;
+    }
+    if (epub.generateThumbBmp(gridCoverWidth, gridCoverHeight, &renderer, SETTINGS.getReaderFontId())) {
+      if (!RECENT_BOOKS.updateBook(book.path, recent->title, recent->author, epub.getThumbBmpPath(),
+                                   recent->coverState))
+        LOG_ERR("LIB", "Cannot update EPUB cover path for %s", book.path.c_str());
+      return true;
+    }
+    if (!epub.hasCoverImage()) {
+      if (!RECENT_BOOKS.updateBook(book.path, recent->title, recent->author, "", RecentBook::CoverState::Missing))
+        LOG_ERR("LIB", "Cannot mark missing EPUB cover for %s", book.path.c_str());
+    }
+    return false;
+  }
+  Xtc xtc(book.path, "/.crosspoint");
+  if (!xtc.load()) {
+    LOG_ERR("LIB", "Cannot load XTC cover for %s", book.path.c_str());
+    return false;
+  }
+  if (!xtc.generateThumbBmp(gridCoverWidth, gridCoverHeight)) return false;
+  if (!RECENT_BOOKS.updateBook(book.path, recent->title, recent->author, xtc.getThumbBmpPath(), recent->coverState))
+    LOG_ERR("LIB", "Cannot update XTC cover path for %s", book.path.c_str());
+  return true;
+}
+
 void LibraryActivity::render(RenderLock&&) {
   uiReady = false;
   if (initialScanPending) {
@@ -818,11 +1158,25 @@ void LibraryActivity::render(RenderLock&&) {
     if (!listNav.consumeRebuildNeeded()) break;
   }
   uiReady = true;
-  if (sortPopup.processRender(renderer, mappedInput)) return;
-  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(query.empty() ? tr(STR_HOME) : tr(STR_BACK)),
-                                            selection < CONTROL_COUNT ? tr(STR_SELECT) : tr(STR_OPEN), tr(STR_DIR_UP),
-                                            tr(STR_DIR_DOWN));
+  if (actionPopup.processRender(renderer, mappedInput)) return;
+  const char* confirmLabel = !mappedInput.hasTouchHardware() && rowCount() == 0 ? ""
+                             : selection < CONTROL_COUNT                        ? tr(STR_SELECT)
+                                                                                : tr(STR_OPEN);
+  const auto labels =
+      mappedInput.mapLabels(mappedInput.withBackArrow(query.empty() ? tr(STR_HOME) : tr(STR_BACK)), confirmLabel,
+                            mappedInput.hasTouchHardware() ? tr(STR_DIR_UP) : tr(STR_SORT),
+                            mappedInput.hasTouchHardware() ? tr(STR_DIR_DOWN) : tr(STR_MENU));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  char footer[32];
+  snprintf(footer, sizeof(footer), tr(STR_LIBRARY_FILES_COUNT), static_cast<unsigned>(rowCount()));
+  int bounds[4]{};
+  renderer.getOrientedViewableTRBL(&bounds[0], &bounds[1], &bounds[2], &bounds[3]);
+  const int buttonHintsHeight =
+      mappedInput.hasTouchHardware() ? 0 : UITheme::getInstance().getMetrics().buttonHintsHeight;
+  renderer.drawCenteredText(SMALL_FONT_ID,
+                            renderer.getScreenHeight() - bounds[2] - buttonHintsHeight -
+                                (FOOTER_HEIGHT + renderer.getLineHeight(SMALL_FONT_ID)) / 2,
+                            footer);
   if (pendingCacheDeletedFeedback) GUI.drawPopup(renderer, tr(STR_BOOK_CACHE_DELETED));
   renderer.displayBuffer();
 }
@@ -840,6 +1194,7 @@ void LibraryActivity::promptDeleteBook(const RecentBook& book) {
       return;
     }
 
+    library::invalidateLibraryIndex();
     RECENT_BOOKS.removeByPath(path);
     reloadAfterBookAction();
   };
@@ -890,6 +1245,15 @@ void LibraryActivity::showBookActionMenu(const size_t bookIndex, const bool igno
                }
 
                switch (static_cast<FileBrowserAction>(actionResult->action)) {
+                 case FileBrowserAction::ToggleBookStatsTracking: {
+                   bool enabled = false;
+                   if (!BookActions::toggleBookStatsTracking(book.path, enabled)) {
+                     const std::string error = std::string(tr(STR_TRACK_READING_STATS)) + " " + tr(STR_FAILED_LOWER);
+                     BookActions::drawToast(renderer, error.c_str());
+                   }
+                   reloadAfterBookAction();
+                   return;
+                 }
                  case FileBrowserAction::ReadingStats:
                    openDialog(BookActions::createReadingStatsActivity(renderer, mappedInput, book.path, book.title),
                               [this](const ActivityResult&) { requestUpdate(); });
