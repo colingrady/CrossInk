@@ -29,10 +29,21 @@ bool isBootImagePath(const std::string& path) { return FsHelpers::hasBmpExtensio
 
 // Letterboxed/centered draw matching BmpViewerActivity's simple centering
 // (no crop or invert options — boot has no settings surface of its own).
-void drawCenteredBootBitmap(const GfxRenderer& renderer, const Bitmap& bitmap) {
+void drawCenteredBootBitmap(const GfxRenderer& renderer, Bitmap& bitmap) {
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
   int x, y;
+
+  // Match fitted sleep images: dither on the screen-sized grid. Besides avoiding
+  // aliasing from rescaling an already dithered image, the decoder then seeks
+  // past unused source rows instead of reading the whole BMP from SD.
+  if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
+    const float scale = std::min(static_cast<float>(pageWidth) / bitmap.getWidth(),
+                                 static_cast<float>(pageHeight) / bitmap.getHeight());
+    const int targetWidth = static_cast<int>(std::floor((bitmap.getWidth() - 1) * scale)) + 1;
+    const int targetHeight = static_cast<int>(std::floor((bitmap.getHeight() - 1) * scale)) + 1;
+    bitmap.setDitheredOutputSize(targetWidth, targetHeight);
+  }
 
   if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
     const float ratio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
@@ -122,7 +133,7 @@ void drawDefaultBootLogo(const GfxRenderer& renderer) {
   renderer.drawImage(Logo120, (pageWidth - 120) / 2, (pageHeight - 120) / 2, 120, 120);
   renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_CROSSINK), true, EpdFontFamily::BOLD);
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_BOOTING));
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, CROSSINK_VERSION);
+  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, AppVersion::version());
 }
 
 }  // namespace

@@ -1,5 +1,6 @@
 #pragma once
 #include <HalDisplay.h>
+#include <ScreenInsets.h>
 
 #include <array>
 #include <functional>
@@ -41,7 +42,6 @@ class HomeActivity final : public Activity {
   int carouselMenuTouchDownIndex = -1;
   bool recentsLoading = false;
   bool recentsLoaded = false;
-  bool firstRenderDone = false;
   // Silent restarts keep the panel's previous frame. The first Home paint may
   // need a clean waveform so X4 panels do not diff against a WiFi screen.
   HalDisplay::RefreshMode initialRefreshMode = HalDisplay::FAST_REFRESH;
@@ -89,6 +89,11 @@ class HomeActivity final : public Activity {
   bool carouselFramesReady = false;
   bool carouselFramesInverted = false;
   bool carouselWarmupPending = false;
+  ScreenInsets insetsBeforeFrontlightPanel;
+  uint8_t themeBeforeFrontlightPanel = 0;
+  uint8_t scaleBeforeFrontlightPanel = 0;
+  uint32_t filenameFontBeforeFrontlightPanel = 0;
+  uint8_t statusSizeBeforeFrontlightPanel = 0;
 
   std::vector<RecentBook> recentBooks;
   const HomeMenuItem initialMenuItem;
@@ -96,6 +101,7 @@ class HomeActivity final : public Activity {
 
   void onSelectBook(const std::string& path);
   void onFileBrowserOpen();
+  void onMinimalBrowseOpen();
   void onContinueReading();
   void onLibraryOpen();
   void onSettingsOpen();
@@ -110,26 +116,23 @@ class HomeActivity final : public Activity {
   void freeCoverBuffer();     // Free the stored cover buffer
   void invalidateCoverCache();
   void invalidatePolarityMismatchedCaches();
-  bool preRenderCarouselFrames(bool showProgressPopup = false);
+  void preRenderCarouselFrames();
   void freeCarouselFrames();
   bool allocateCarouselFrameSlots(int targetFrameCount);
-  bool buildCarouselCacheFile(const std::string& cacheKey, uint64_t cacheKeyHash, int bookCount,
-                              bool showProgressPopup = false);
+  bool saveCarouselFrameToDisk(uint64_t cacheKeyHash, int bookCount, int bookIdx, int slotIdx);
   bool loadCarouselFrameFromDisk(uint64_t cacheKeyHash, int bookCount, int bookIdx, int slotIdx);
   int chooseCarouselEvictionSlot(int centerIdx, int bookCount,
                                  std::optional<int> protectedBookIdx = std::nullopt) const;
-  void renderCarouselFrameToCurrentBuffer(int bookIdx, BookReadingStats* outStats, float* outProgressPercent,
-                                          bool* outUsedCachedStats);
+  void renderCarouselFrameToCurrentBuffer(int bookIdx);
   void renderCarouselFrame(int bookIdx, int slotIdx);
-  void updateSlidingWindowCache(int centerIdx, int bookCount);
   int getHighlightedBookIndex() const;
   int getVisibleRecentBookCount() const;
   bool canSwapHomeBook() const;
   void showNextRecentBookOnHome();
   void updateHighlightedBookContext(bool allowChapterTitleRead = true);
   void loadRecentBooks(int maxBooks);
-  void fillCoverGridFromLibrary();
-  void loadCoverGridThumbnails();
+  // Returns true when Home needs a repaint for new artwork or to clear progress.
+  bool loadCoverGridThumbnails();
   void activateCoverGridSelection();
   void loadAllBookStats();
   void loadRecentCovers(int coverHeight);
@@ -154,6 +157,6 @@ class HomeActivity final : public Activity {
   std::string getCurrentBookPath() const override;
   std::string getCurrentBookTitle() const override;
   std::unique_ptr<Activity> createFrontlightReadingStatsActivity() override;
+  void onFrontlightPanelOpened() override;
   void onFrontlightPanelClosed() override;
-  bool handleFrontlightPanelResult(const FrontlightPanelResult& result) override;
 };

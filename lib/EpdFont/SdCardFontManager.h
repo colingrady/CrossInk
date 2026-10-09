@@ -47,7 +47,7 @@ class SdCardFontManager {
   bool loadFamilyFile(const char* path, const char* familyName, uint8_t pointSize, GfxRenderer& renderer);
 
   // Additively load the .cpfont of `family` at the exact physical `pointSize`
-  // (used for size-matched CJK UI fallback alongside the reader-size font).
+  // for temporary text surfaces such as dictionary lookup.
   // Does not unload anything. If a font of that size is already loaded its id
   // is reused. Returns the font id, or 0 if the family has no file at that size
   // or loading failed.
@@ -110,6 +110,7 @@ class SdCardFontManager {
                     const freeink::font::FtFont::RenderOptions& renderOptions, bool temporary = false);
   void refreshScalableHash();
   int registerScalableSize(GfxRenderer& renderer, uint8_t size);
+  bool registerScalableContentSizes(GfxRenderer& renderer);
 #endif
   struct LoadedFont {
     SdCardFont* font;  // heap-allocated, owned

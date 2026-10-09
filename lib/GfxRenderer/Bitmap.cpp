@@ -140,9 +140,22 @@ BmpReaderError Bitmap::parseHeaders() {
 
   for (int i = 0; i < 256; i++) paletteLum[i] = static_cast<uint8_t>(i);
   if (colorsUsed > 0) {
+    const uint64_t paletteEnd = 14ULL + biSize + 4ULL * colorsUsed;
+    if (paletteEnd > bfOffBits) {
+      LOG_ERR("BMP", "Palette overlaps pixel data");
+      return BmpReaderError::FileInvalid;
+    }
+    // The palette follows the full DIB header. V4/V5 headers (108/124 bytes, as
+    // written by GIMP and ImageMagick) are longer than the 40 bytes parsed above.
+    if (!file.seek(14 + biSize)) {
+      return BmpReaderError::SeekPixelDataFailed;
+    }
     for (uint32_t i = 0; i < colorsUsed; i++) {
       uint8_t rgb[4];
-      file.read(rgb, 4);  // Read B, G, R, Reserved in one go
+      if (file.read(rgb, 4) != 4) {  // Read B, G, R, Reserved in one go
+        LOG_ERR("BMP", "Incomplete palette entry %u", static_cast<unsigned>(i));
+        return BmpReaderError::FileInvalid;
+      }
       paletteLum[i] = (77u * rgb[2] + 150u * rgb[1] + 29u * rgb[0]) >> 8;
     }
   }
@@ -225,9 +238,38 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
   // wallpaper fitted to an X3 becomes 475x792 here, so error diffusion never
   // has to survive the renderer's later non-integer scale.
   const int sourceY = std::min(height - 1, (outputRowsRead * height + height / 2) / outputHeight);
+  // Downsampling only uses one source row per output row. Seek past the rows
+  // in between instead of streaming them from SD: a 1448-row wallpaper fitted
+  // to an 800-row panel then reads ~55% of its pixel data per decode pass.
+  if (sourceY > sourceRowsRead) {
+    const int64_t skipBytes = static_cast<int64_t>(sourceY - sourceRowsRead) * rowBytes;
+    if (file.seekCur(skipBytes)) {
+      sourceRowsRead = sourceY;
+    }
+    // On a failed seek, fall through and read the rows sequentially.
+  }
   while (sourceRowsRead <= sourceY) {
     if (file.read(rowBuffer, rowBytes) != rowBytes) return BmpReaderError::ShortReadRow;
     sourceRowsRead++;
+  }
+
+  if (bpp == 1 && outputWidth == width) {
+    // Home thumbnails and monochrome wallpapers already have a native
+    // palette. Expand four pixels together, preserving either palette order
+    // and transparent (undrawn) whites in the renderer. The table lives in
+    // flash; no extra row buffer or framebuffer is needed.
+    static constexpr uint8_t expanded[] = {0x00, 0x03, 0x0C, 0x0F, 0x30, 0x33, 0x3C, 0x3F,
+                                           0xC0, 0xC3, 0xCC, 0xCF, 0xF0, 0xF3, 0xFC, 0xFF};
+    const uint8_t zero = static_cast<uint8_t>((adjustPixel(paletteLum[0]) >> 6) * 0x55);
+    const uint8_t difference = zero ^ static_cast<uint8_t>((adjustPixel(paletteLum[1]) >> 6) * 0x55);
+    const int outputBytes = (width + 3) / 4;
+    for (int i = 0; i < outputBytes; ++i) {
+      const uint8_t nibble = (rowBuffer[i / 2] >> ((i & 1) ? 0 : 4)) & 0x0F;
+      data[i] = zero ^ (expanded[nibble] & difference);
+    }
+    if (width & 3) data[outputBytes - 1] &= static_cast<uint8_t>(0xFF << (2 * (4 - (width & 3))));
+    ++outputRowsRead;
+    return BmpReaderError::Ok;
   }
 
   uint8_t* outPtr = data;

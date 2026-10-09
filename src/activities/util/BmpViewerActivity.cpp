@@ -143,12 +143,30 @@ void BmpViewerActivity::onEnter() {
   if (siblingImages.empty() && !filePath.empty()) {
     loadSiblingImages();
   }
+  requestImageRedraw();
+}
 
+void BmpViewerActivity::requestImageRedraw() {
+  needsImageRedraw.store(true, std::memory_order_release);
+  requestUpdate();
+}
+
+void BmpViewerActivity::onFrontlightPanelClosed() {
+  // The drop-down panel drew over the top of the image in the shared framebuffer.
+  requestImageRedraw();
+}
+
+void BmpViewerActivity::render(RenderLock&&) {
+  if (!needsImageRedraw.exchange(false, std::memory_order_acq_rel)) return;
+  drawImage();
+}
+
+void BmpViewerActivity::drawImage() {
   HalFile file;
 
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
-  Rect popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  Rect popupRect = GUI.drawPopup(renderer, tr(STR_LOADING));
   GUI.fillPopupProgress(renderer, popupRect, 20);  // Initial 20% progress
 
   if (FsHelpers::hasPngExtension(filePath)) {
@@ -250,7 +268,9 @@ void BmpViewerActivity::onExit() {
 }
 
 void BmpViewerActivity::doSetSleepCover() {
-  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  // The popups draw from this task; wait for any image redraw on the render task.
+  RenderLock lock(*this);
+  GUI.drawPopup(renderer, tr(STR_LOADING));
 
   APP_STATE.favoriteSleepImagePath = filePath;
   if (APP_STATE.saveToFile()) {
@@ -273,9 +293,10 @@ void BmpViewerActivity::doSetSleepCover() {
     LOG_ERR("BmpViewer", "Failed to save favorite sleep image path: %s", filePath.c_str());
     GUI.drawPopup(renderer, tr(STR_FAILED_LOWER));
   }
+  lock.unlock();
 
   delay(1000);
-  onEnter();
+  requestImageRedraw();
 }
 
 void BmpViewerActivity::pinSleepFavorite() {
@@ -325,6 +346,7 @@ void BmpViewerActivity::unpinBootFavorite() {
 
 void BmpViewerActivity::promptDeleteImage() {
   const std::string path = filePath;
+  needsImageRedraw.store(true, std::memory_order_release);  // the prompt draws over the image
   startActivityForResult(
       std::make_unique<ConfirmationActivity>(renderer, mappedInput, BookActions::confirmationHeading(StrId::STR_DELETE),
                                              imageDisplayName(path)),
@@ -362,6 +384,7 @@ void BmpViewerActivity::showContextMenu() {
                      isBootPinned ? StrId::STR_CLEAR_BOOT_SCREEN : StrId::STR_SET_AS_BOOT_SCREEN});
   }
 
+  needsImageRedraw.store(true, std::memory_order_release);  // the menu draws over the image
   startActivityForResult(std::make_unique<FileBrowserActionActivity>(renderer, mappedInput, imageDisplayName(filePath),
                                                                      std::move(items), false, false),
                          [this](const ActivityResult& result) {
@@ -400,6 +423,8 @@ void BmpViewerActivity::showContextMenu() {
                              case FileBrowserAction::DeleteCache:
                              case FileBrowserAction::ReadingStats:
                              case FileBrowserAction::ToggleBookStatsTracking:
+                             case FileBrowserAction::SyncProgress:
+                             case FileBrowserAction::UploadFolderProgress:
                              case FileBrowserAction::SetSleepFolder:
                              case FileBrowserAction::ClearSleepFolder:
                              case FileBrowserAction::ToggleCompleted:
@@ -429,11 +454,15 @@ void BmpViewerActivity::loop() {
     if (siblingImages.size() <= 1 || nextIndex < 0 || nextIndex >= static_cast<int>(siblingImages.size())) {
       return false;
     }
-    currentImageIndex = nextIndex;
     std::string dirPath = FsHelpers::extractFolderPath(filePath);
     if (dirPath.back() != '/') dirPath += "/";
-    filePath = dirPath + siblingImages[currentImageIndex];
-    onEnter();
+    {
+      // render() reads filePath and currentImageIndex on the render task.
+      RenderLock lock(*this);
+      currentImageIndex = nextIndex;
+      filePath = dirPath + siblingImages[currentImageIndex];
+    }
+    requestImageRedraw();
     return true;
   };
 

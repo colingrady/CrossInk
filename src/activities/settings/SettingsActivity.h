@@ -12,6 +12,7 @@
 
 #include "CrossPointSettings.h"
 #include "activities/Activity.h"
+#include "components/MenuNavigationNote.h"
 #include "components/OptionPopup.h"
 #include "util/ButtonNavigator.h"
 
@@ -22,6 +23,8 @@ enum class SettingAction {
   RemapFrontButtons,
   RemapFrontButtonsReader,
   CustomiseStatusBar,
+  DisplayStatusBar,
+  ScreenCalibration,
   KOReaderSync,
   OPDSBrowser,
   DisplaySleepScreen,
@@ -37,6 +40,7 @@ enum class SettingAction {
   ControlsTapsGestures,
   ControlsTwoFingerSwipe,
   ControlsEdgeGestures,
+  About,
   SystemDevice,
   SystemFilesCache,
   SystemReadingStats,
@@ -48,6 +52,8 @@ enum class SettingAction {
   CheckForUpdates,
   SdFirmwareUpdate,
   Language,
+  ManageHyphenation,
+  FilenameFallbackFont,
   KeyboardLayouts,
   DownloadFonts,
   TtfRendering,
@@ -219,7 +225,8 @@ inline std::string settingEnumOptionLabel(const SettingInfo& setting, const uint
 
 inline bool settingShowsNavigationCaret(const SettingInfo& setting) {
   return setting.type == SettingType::SUBMENU || setting.action == SettingAction::CustomiseStatusBar ||
-         setting.action == SettingAction::QuickActions || setting.action == SettingAction::TtfRendering;
+         setting.action == SettingAction::DisplayStatusBar || setting.action == SettingAction::QuickActions ||
+         setting.action == SettingAction::TtfRendering;
 }
 
 class SettingsActivity final : public Activity {
@@ -275,6 +282,15 @@ class SettingsActivity final : public Activity {
   SettingAction parentSubmenu = SettingAction::None;
 
   OptionPopup optionPopup;
+  HeapObject<I18n::Catalog> languageCatalog;
+  I18n::Option pendingLanguage;
+#if CROSSINK_SCALABLE_FONTS
+  std::vector<std::string> filenameFontNames;
+  char pendingFilenameFont[64] = {};
+  bool filenameFontSelectionPending = false;
+#endif
+  StrId languageError = StrId::_COUNT;
+  MenuNavigationNote menuNavigationNote;
 
   static constexpr int categoryCount = 4;
   static const StrId categoryNames[categoryCount];
@@ -306,7 +322,10 @@ class SettingsActivity final : public Activity {
   void openEnumOptionPicker(const SettingInfo& setting);
   void openScreenMarginPicker(const SettingInfo& setting);
   void openWordSpacingPicker();
+  void openCharacterSpacingPicker();
   void openLanguagePicker();
+  void openFilenameFontPicker();
+  void applyLanguage(const I18n::Option& selected);
   void openIdleTimeThresholdPicker();
   void toggleCurrentSetting();
   void openSleepTimeoutPicker();
@@ -324,6 +343,15 @@ class SettingsActivity final : public Activity {
                             bool returnToParentOnClose = false, View view = View::Root);
   bool allowGlobalHomeSwipeGesture() const override { return false; }
   bool handleHomeGesture() override;
+#ifdef SIMULATOR
+  int simulatorCategoryIndex() const { return selectedCategoryIndex; }
+  int simulatorSelectedIndex() const { return selectedSettingIndex; }
+#if CROSSINK_SCALABLE_FONTS
+  const std::vector<std::string>& simulatorFilenameFontNames() const { return filenameFontNames; }
+  bool simulatorOptionPopupActive() const { return optionPopup.isActive(); }
+#endif
+  freeink::ui::Rect simulatorSafeRect() const { return app.device().safeRect(); }
+#endif
   void onEnter() override;
   void onExit() override;
   void loop() override;

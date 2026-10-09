@@ -145,8 +145,6 @@ int SdCardFontManager::loadFamilyExtraFile(const char* path, const char* familyN
 }
 
 void SdCardFontManager::unloadAll(GfxRenderer& renderer) {
-  // Drop UI CJK fallbacks before the SD fonts they point at are freed.
-  renderer.clearFallbackFonts();
   renderer.clearSdCardFonts();
   for (auto& lf : loaded_) {
     renderer.removeFont(lf.fontId);
@@ -187,10 +185,20 @@ int SdCardFontManager::registerScalableSize(GfxRenderer& renderer, uint8_t size)
     LOG_ERR("SDMGR", "TTF font ID collision");
     return 0;
   }
-  loaded_.reserve(8);
+  loaded_.reserve(ScalableContentMaxPointSize - ScalableContentMinPointSize + 1);
   loaded_.push_back({nullptr, id, size});
   renderer.insertFont(id, EpdFontFamily(styles[0], styles[1], styles[2], styles[3]));
   return id;
+}
+bool SdCardFontManager::registerScalableContentSizes(GfxRenderer& renderer) {
+  for (uint8_t size = ScalableContentMinPointSize; size <= ScalableContentMaxPointSize; ++size) {
+    if (!registerScalableSize(renderer, size)) {
+      LOG_ERR("SDMGR", "Cannot register EPUB font size %u", unsigned(size));
+      unloadAll(renderer);
+      return false;
+    }
+  }
+  return true;
 }
 void SdCardFontManager::refreshScalableHash() {
   scalableHash_ = 0;
@@ -201,7 +209,6 @@ bool SdCardFontManager::setScalableRenderOptions(GfxRenderer& renderer,
                                                  const freeink::font::FtFont::RenderOptions& renderOptions) {
   if (!scalable_[0] || loadedFamilyName_.empty() || loadedPointSize_ == 0) return false;
 
-  renderer.clearFallbackFonts();
   renderer.clearSdCardFonts();
   for (auto& loaded : loaded_) renderer.removeFont(loaded.fontId);
   loaded_.clear();
@@ -219,7 +226,7 @@ bool SdCardFontManager::setScalableRenderOptions(GfxRenderer& renderer,
 
   refreshScalableHash();
   activeScalableId_ = registerScalableSize(renderer, loadedPointSize_);
-  return activeScalableId_ != 0;
+  return activeScalableId_ != 0 && (temporaryScalable_ || registerScalableContentSizes(renderer));
 }
 bool SdCardFontManager::loadDictionaryFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer,
                                              const uint8_t pointSize,
@@ -298,6 +305,6 @@ bool SdCardFontManager::loadScalable(const SdCardFontFamilyInfo& family, GfxRend
     return false;
   }
   loadedPointSize_ = size;
-  return true;
+  return temporary || registerScalableContentSizes(renderer);
 }
 #endif

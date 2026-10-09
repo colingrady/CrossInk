@@ -683,6 +683,13 @@ bool BookmarkStore::migrateForFilePath(const std::string& oldFilePath, const std
   return true;
 }
 
+bool BookmarkStore::hasStoredStateForFilePath(const std::string& filePath, const std::string& bookType) {
+  const auto paths = {currentStoreFilePathForBook(filePath, bookType), legacyStoreFilePathForBook(filePath, bookType)};
+  return std::any_of(paths.begin(), paths.end(), [](const auto& path) {
+    return Storage.exists(path.c_str()) || Storage.exists((path + ".rename.bak").c_str());
+  });
+}
+
 bool BookmarkStore::beginRenameMigration(const std::string& oldFilePath, const std::string& newFilePath,
                                          const std::string& title, const std::string& author,
                                          const std::string& bookType, RenameMigration& migration) {

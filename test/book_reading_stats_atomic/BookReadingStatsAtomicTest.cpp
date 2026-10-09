@@ -91,6 +91,22 @@ TEST_F(BookReadingStatsAtomicTest, SuccessfulReplacementRemovesTransactionFiles)
   EXPECT_FALSE(Storage.exists((statsPath + ".bak").c_str()));
 }
 
+TEST_F(BookReadingStatsAtomicTest, IdenticalSaveSkipsWrite) {
+  statsWithSeconds(123).save(CACHE_PATH);
+  // The write path always clears a stale backup, so a surviving marker proves it did not run.
+  FsFile marker;
+  ASSERT_TRUE(Storage.openFileForWrite("TEST", statsPath + ".bak", marker));
+  ASSERT_EQ(marker.write(static_cast<uint8_t>(7)), 1U);
+  ASSERT_TRUE(marker.close());
+
+  statsWithSeconds(123).save(CACHE_PATH);
+  EXPECT_TRUE(Storage.exists((statsPath + ".bak").c_str()));
+
+  statsWithSeconds(124).save(CACHE_PATH);
+  EXPECT_FALSE(Storage.exists((statsPath + ".bak").c_str()));
+  EXPECT_EQ(BookReadingStats::load(CACHE_PATH).totalReadingSeconds, 124U);
+}
+
 TEST_F(BookReadingStatsAtomicTest, RemoveClearsRecoverableTransactionFiles) {
   statsWithSeconds(123).save(CACHE_PATH);
   ASSERT_TRUE(Storage.rename(statsPath.c_str(), (statsPath + ".bak").c_str()));
@@ -127,4 +143,32 @@ TEST_F(BookReadingStatsAtomicTest, FailedFallbackRemovalKeepsCanonicalStats) {
 
   EXPECT_TRUE(Storage.exists(statsPath.c_str()));
   EXPECT_EQ(BookReadingStats::load(CACHE_PATH).totalReadingSeconds, 456U);
+}
+
+TEST_F(BookReadingStatsAtomicTest, UploadRejectsMissingTruncatedAndNewerSnapshots) {
+  BookReadingStats snapshot;
+  EXPECT_FALSE(BookReadingStats::loadForUpload(CACHE_PATH, snapshot));
+  FsFile file;
+  ASSERT_TRUE(Storage.openFileForWrite("TEST", statsPath, file));
+  ASSERT_EQ(file.write(static_cast<uint8_t>(5)), 1U);
+  file.close();
+  EXPECT_FALSE(BookReadingStats::loadForUpload(CACHE_PATH, snapshot));
+  ASSERT_TRUE(statsWithSeconds(123).save(CACHE_PATH));
+  ASSERT_TRUE(BookReadingStats::loadForUpload(CACHE_PATH, snapshot));
+  EXPECT_EQ(snapshot.totalReadingSeconds, 123U);
+  // Oversized future payload must not be accepted merely because its first
+  // 73 bytes look like the current format.
+  ASSERT_TRUE(Storage.openFileForWrite("TEST", statsPath, file));
+  uint8_t oversized[74]{};
+  oversized[0] = 5;
+  file.write(oversized, sizeof(oversized));
+  file.close();
+  EXPECT_FALSE(BookReadingStats::loadForUpload(CACHE_PATH, snapshot));
+}
+
+TEST_F(BookReadingStatsAtomicTest, UploadAcceptsAnExplicitlySavedEmptySnapshot) {
+  ASSERT_TRUE(BookReadingStats{}.save(CACHE_PATH));
+  BookReadingStats snapshot;
+  EXPECT_TRUE(BookReadingStats::loadForUpload(CACHE_PATH, snapshot));
+  EXPECT_EQ(snapshot.totalReadingSeconds, 0U);
 }

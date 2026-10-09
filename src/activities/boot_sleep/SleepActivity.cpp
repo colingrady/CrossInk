@@ -1,7 +1,6 @@
 #include "SleepActivity.h"
 
 #include <BitmapHelpers.h>
-#include <BoardConfig.h>
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -10,6 +9,7 @@
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <PNGdec.h>
 // PNGdec's bundled zlib internals leak this macro into later FreeInkUI headers.
 #undef local
@@ -63,23 +63,28 @@ void hideOverlayBatteryStrip(const GfxRenderer& renderer) {
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
                                    &orientedMarginLeft);
 
-  const int statusBarHeight = UITheme::getInstance().getStatusBarHeight();
+  const int statusBarHeight = UITheme::getInstance().getStatusBarHeight(renderer);
   if (statusBarHeight <= 0) {
     return;
   }
 
   const int textY = renderer.getScreenHeight() - statusBarHeight - orientedMarginBottom - 4;
-  const bool showBatteryPercentage =
-      SETTINGS.hideBatteryPercentage == CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_NEVER;
+  const auto batteryStyle = SETTINGS.readerStatusBar(ReaderStatusBarPosition::Bottom).batteryStyle;
+  const bool showBatteryIcon = batteryStyle != ReaderStatusBarBatteryStyle::PercentOnly;
+  const bool showBatteryPercentage = batteryStyle != ReaderStatusBarBatteryStyle::IconOnly;
 
   // Reserve the full left-side status indicator lane used by bookmark + battery.
   // This keeps chapter/progress text readable while removing the battery glance target.
   static constexpr int bookmarkReserveWidth = 13;  // bookmark width + gap from BaseTheme::drawReaderStatusBar()
   static constexpr int batteryPercentSpacing = 4;  // matches BaseTheme::batteryPercentSpacing
-  const int clearWidth =
-      bookmarkReserveWidth + metrics.batteryWidth +
-      (showBatteryPercentage ? batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, "100%") : 0);
-  const int clearHeight = std::max(renderer.getTextHeight(SMALL_FONT_ID), metrics.batteryHeight + 6);
+  const int clearWidth = bookmarkReserveWidth + (showBatteryIcon ? metrics.batteryWidth : 0) +
+                         (showBatteryPercentage ? (showBatteryIcon ? batteryPercentSpacing : 0) +
+                                                      renderer.getTextWidth(UITheme::getReaderStatusBarFontId(), "100%")
+                                                : 0);
+  const int clearHeight =
+      std::max(renderer.getTextHeight(UITheme::getReaderStatusBarFontId()),
+               metrics.batteryHeight + 6 + renderer.getLineHeight(UITheme::getReaderStatusBarFontId()) -
+                   renderer.getLineHeight(SMALL_FONT_ID));
 
   renderer.fillRect(metrics.statusBarHorizontalMargin + orientedMarginLeft + 1, textY, clearWidth, clearHeight, false);
 }
@@ -540,19 +545,13 @@ void SleepActivity::onEnter() {
   overlayBackgroundBufferStored =
       sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY && renderer.storeBwBuffer();
 
-  // X4 Pro and X4 Classic share a panel that can retain this high-contrast
-  // transient update beneath the final OEM-style sleep refresh. Render only
-  // the final sleep frame on that panel family.
-  const bool showSleepPopup = !BoardConfig::isX4Pro() && !CROSSINK_APP_DEVICE_X4CLASSIC;
   // Show the popup in the orientation that was visible before reader exit restores
   // global settings. Reset to portrait afterwards so sleep screen layout stays unchanged.
   if (APP_STATE.lastSleepFromReader) {
-    if (showSleepPopup) {
-      renderer.setOrientation(sleepPopupOrientation);
-      GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
-    }
+    renderer.setOrientation(sleepPopupOrientation);
+    GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
     renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-  } else if (showSleepPopup) {
+  } else {
     GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
   }
 
@@ -586,6 +585,41 @@ void SleepActivity::onEnter() {
   }
 }
 
+bool SleepActivity::rendersBeforeExit() const {
+  // Keep the reader's cleanup first on devices without PSRAM. Covers and custom
+  // images can otherwise compete with the reader for scarce internal memory.
+  if (!psramHeapAvailable()) return false;
+  if (fromTimeout &&
+      SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT) {
+    return false;
+  }
+  switch (SETTINGS.sleepScreen) {
+    case CrossPointSettings::SLEEP_SCREEN_MODE::DARK:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::LIGHT:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::BLANK:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM:
+      return true;
+    case CrossPointSettings::SLEEP_SCREEN_MODE::COVER:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM: {
+      if (SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM &&
+          !APP_STATE.lastSleepFromReader) {
+        return true;
+      }
+      const std::string& path = currentBookPath.empty() ? APP_STATE.openEpubPath : currentBookPath;
+      if (path.empty()) return true;
+      // Uncached covers still need the memory and file handles released on exit.
+      const bool absolute = renderer.supportsAbsoluteGrayscale() &&
+                            SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
+      const bool cropped = SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP;
+      return !SleepCoverAssets::cachedCoverPathFor(path, cropped, absolute).empty();
+    }
+    default:
+      // Stats and overlay screens need the latest persisted reader state.
+      // Quick Resume keeps its existing retained-frame lifecycle.
+      return false;
+  }
+}
+
 void SleepActivity::renderCustomSleepScreen() const {
   const auto tryRenderSelection = [this](const SleepImageSelection& selection) {
     FsFile file;
@@ -595,7 +629,6 @@ void SleepActivity::renderCustomSleepScreen() const {
     }
 
     LOG_INF("SLP", "Loading custom sleep image: %s", selection.path.c_str());
-    delay(100);
     // Use image-specific gray levels only when the panel accepts complete planes.
     Bitmap bitmap(file, true,
                   renderer.supportsAbsoluteGrayscale() &&
@@ -668,7 +701,7 @@ void SleepActivity::renderDefaultSleepScreen() const {
   }
 
 #ifdef CROSSINK_SHOW_SLEEP_BUILD_INFO
-  const std::string buildInfo = std::string(CROSSINK_BUILD_ENV) + " " + CROSSINK_VERSION;
+  const std::string buildInfo = std::string(CROSSINK_BUILD_ENV) + " " + AppVersion::version();
   const std::string visibleBuildInfo =
       renderer.truncatedText(SMALL_FONT_ID, buildInfo.c_str(), pageWidth - sleepBuildInfoSideMargin * 2);
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 118, visibleBuildInfo.c_str(), lightSleepScreen);
@@ -726,11 +759,16 @@ bool SleepActivity::renderBitmapSleepScreen(Bitmap& bitmap) const {
 
   const bool hasGreyscale = bitmap.hasGreyscale() &&
                             SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
+  const bool absolute = renderer.supportsAbsoluteGrayscale();
+  const bool direct = absolute && renderer.supportsDirectGrayscale();
 
-  if (!renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY)) return false;
-
-  if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
-    renderer.invertScreen();
+  // Direct grayscale consumes only the two complete gray planes. Other modes
+  // still need the B/W base, so only Direct can skip this extra image decode.
+  if (!hasGreyscale || !direct) {
+    if (!renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY)) return false;
+    if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
+      renderer.invertScreen();
+    }
   }
 
   if (!hasGreyscale) {
@@ -743,8 +781,6 @@ bool SleepActivity::renderBitmapSleepScreen(Bitmap& bitmap) const {
   // first. Keep `absolute` on the Absolute probe alone so it matches what the
   // callers pass to SleepCoverAssets and the Bitmap dither/level mode; Direct
   // is only ever an upgrade on top of it, never a substitute.
-  const bool absolute = renderer.supportsAbsoluteGrayscale();
-  const bool direct = absolute && renderer.supportsDirectGrayscale();
   if (absolute) {
     if (!(direct ? renderer.displayDirectGrayscaleBase() : renderer.displayAbsoluteGrayscaleBase())) return false;
   } else {

@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
 
+// Include standard headers before the class/private macros below: libstdc++
+// templates declared with `class` do not compile if first parsed under them.
+#include <algorithm>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <string>
 #include <utility>
@@ -15,11 +19,24 @@
 
 #include <GfxRenderer.h>
 
+extern uint32_t testHyphenationIdentity;
+
 namespace {
-constexpr uint8_t kFullVersion = 78;
-constexpr uint8_t kPartialVersion = 0xF2;
-constexpr uint8_t kPreviousFullVersion = 77;
-constexpr uint8_t kPreviousPartialVersion = 0xF3;
+constexpr uint8_t kFullVersion = 88;
+constexpr uint8_t kPartialVersion = 0xC9;
+constexpr uint8_t kPreviousFullVersion = 87;
+constexpr uint8_t kParagraphSpacingFullVersion = 85;
+constexpr uint8_t kBorderSuppressionFullVersion = 84;
+constexpr uint8_t kPreviousPartialVersion = 0xC8;
+constexpr uint8_t kParagraphSpacingPartialVersion = 0xC6;
+constexpr uint8_t kBorderSuppressionPartialVersion = 0xC5;
+constexpr uint8_t kOlderFullVersion = 79;
+constexpr uint8_t kOlderPartialVersion = 0xF4;
+constexpr uint8_t kEarlierFullVersion = 78;
+constexpr uint8_t kEarlierPartialVersion = 0xF2;
+constexpr uint8_t kLastReleaseFullVersion = 77;
+constexpr uint8_t kLastReleasePartialVersion = 0xF3;
+constexpr uint8_t kPreviousReleasePrepPartialVersion = 0x80;
 
 ReaderRenderSpec renderSpec() {
   ReaderRenderSpec spec;
@@ -34,7 +51,9 @@ ReaderRenderSpec renderSpec() {
 struct SectionHarness {
   Epub epub{"/books/test.epub", "/cache"};
   GfxRenderer renderer;
-  Section section{epub, 0, renderer};
+  Section section;
+  explicit SectionHarness(EpubRenderMode mode = EpubRenderMode::CrossInkDefault)
+      : section(epub, 0, renderer, sectionCacheSuffixForRenderMode(mode)) {}
   ReaderRenderSpec spec = renderSpec();
 
   void begin(const std::vector<std::pair<std::string, uint16_t>>& anchors = {}) {
@@ -77,7 +96,10 @@ struct SectionHarness {
 
 class SectionPersistenceTest : public testing::Test {
  protected:
-  void SetUp() override { Storage.reset(); }
+  void SetUp() override {
+    Storage.reset();
+    testHyphenationIdentity = 1;
+  }
 };
 
 TEST_F(SectionPersistenceTest, FullCommitReopensAndResolvesMetadataAcrossAChunkBoundary) {
@@ -152,7 +174,11 @@ TEST_F(SectionPersistenceTest, FailedCommitKeepsThePreviousReadableCache) {
 }
 
 TEST_F(SectionPersistenceTest, RejectsCachesFromPreviousLayoutRevisions) {
-  for (const uint8_t staleVersion : {kPreviousFullVersion, kPreviousPartialVersion}) {
+  for (const uint8_t staleVersion :
+       {kPreviousFullVersion, kPreviousPartialVersion, kParagraphSpacingFullVersion, kParagraphSpacingPartialVersion,
+        kBorderSuppressionFullVersion, kBorderSuppressionPartialVersion, kOlderFullVersion, kOlderPartialVersion,
+        kEarlierFullVersion, kEarlierPartialVersion, kLastReleaseFullVersion, kLastReleasePartialVersion,
+        kPreviousReleasePrepPartialVersion}) {
     SectionHarness harness;
     harness.begin();
     harness.appendPages(1);
@@ -164,4 +190,116 @@ TEST_F(SectionPersistenceTest, RejectsCachesFromPreviousLayoutRevisions) {
     EXPECT_FALSE(Storage.exists(harness.section.filePath.c_str()));
   }
 }
+TEST_F(SectionPersistenceTest, PositionLookupBatchesReadsAcrossALongChapter) {
+  SectionHarness harness;
+  harness.begin();
+  harness.appendPages(1025);
+  ASSERT_TRUE(harness.commit(kFullVersion));
+  harness.finishSuccessfulCommit();
+  Section reopened(harness.epub, 0, harness.renderer);
+  ASSERT_TRUE(reopened.loadSectionFile(harness.spec));
+  const size_t readsBefore = Storage.reads(reopened.filePath);
+  const size_t seeksBefore = Storage.seeks(reopened.filePath);
+  EXPECT_EQ(reopened.getPageForVisibleTextOffset(1024 * 17), 1024);
+  // Five header reads plus ceil(1025/32) batches, and just three seeks.
+  EXPECT_LE(Storage.reads(reopened.filePath) - readsBefore, 38U);
+  EXPECT_LE(Storage.seeks(reopened.filePath) - seeksBefore, 3U);
+}
+
+TEST_F(SectionPersistenceTest, PositionLookupPreservesFirstAndLastDuplicateAcrossBatchBoundary) {
+  SectionHarness harness;
+  harness.begin();
+  for (size_t i = 0; i < 66; ++i) {
+    ASSERT_EQ(harness.section.build_->pageIndex.prepareAppend(), SectionPageIndex::PrepareResult::Ready);
+    const uint32_t position = harness.section.onPageComplete(std::make_unique<Page>());
+    const uint32_t offset = i < 31 ? 0 : (i <= 64 ? 100 : 200);
+    harness.section.build_->pageIndex.appendPrepared({position, 0, 0, offset});
+  }
+  ASSERT_TRUE(harness.commit(kFullVersion));
+  harness.finishSuccessfulCommit();
+  Section reopened(harness.epub, 0, harness.renderer);
+  ASSERT_TRUE(reopened.loadSectionFile(harness.spec));
+  EXPECT_EQ(reopened.getPageForVisibleTextOffset(0, true), 0);
+  EXPECT_EQ(reopened.getPageForVisibleTextOffset(0), 30);
+  EXPECT_EQ(reopened.getPageForVisibleTextOffset(100, true), 31);
+  EXPECT_EQ(reopened.getPageForVisibleTextOffset(100), 64);
+  EXPECT_EQ(reopened.getPageForVisibleTextOffset(150, true), 64);
+  EXPECT_EQ(reopened.getPageForVisibleTextOffset(999), 65);
+}
+
+TEST_F(SectionPersistenceTest, PartialPositionLookupRejectsOffsetsBeyondCommittedPages) {
+  SectionHarness harness;
+  harness.begin();
+  harness.appendPages(65);
+  ASSERT_TRUE(harness.commit(kPartialVersion, 12345, 67890));
+  harness.finishSuccessfulCommit();
+  Section reopened(harness.epub, 0, harness.renderer);
+  ASSERT_TRUE(reopened.loadSectionFile(harness.spec));
+  EXPECT_EQ(reopened.getPageForVisibleTextOffset(1088), 64);
+  EXPECT_EQ(reopened.getPageForVisibleTextOffset(1089), std::nullopt);
+  EXPECT_EQ(reopened.getPageForVisibleTextOffset(1089, true), std::nullopt);
+}
+
 }  // namespace
+
+TEST_F(SectionPersistenceTest, SyncLookupsUseTheSelectedRenderModesCache) {
+  const EpubRenderMode modes[] = {EpubRenderMode::CrossInkDefault, EpubRenderMode::Balanced, EpubRenderMode::Light};
+  for (int i = 0; i < 3; ++i) {
+    SectionHarness harness(modes[i]);
+    harness.spec.renderMode = modes[i];
+    harness.begin();
+    harness.appendPages(i + 2);
+    ASSERT_TRUE(harness.commit(kFullVersion));
+    harness.finishSuccessfulCommit();
+  }
+  Epub epub{"/books/test.epub", "/cache"};
+  GfxRenderer renderer;
+  for (int i = 0; i < 3; ++i) {
+    Section section(epub, 0, renderer, sectionCacheSuffixForRenderMode(modes[i]));
+    EXPECT_EQ(section.getCachedPageCount(), i + 2);
+    EXPECT_EQ(section.getPageForParagraphIndex((i + 1) * 3), i + 1);
+  }
+}
+
+TEST_F(SectionPersistenceTest, ChangedPatternsInvalidateCompleteAndPartialSections) {
+  for (const auto version : {kFullVersion, kPartialVersion}) {
+    Storage.reset();
+    testHyphenationIdentity = 41;
+    SectionHarness harness;
+    harness.begin();
+    harness.appendPages(1);
+    ASSERT_TRUE(harness.commit(version, version == kPartialVersion ? 100 : 0, 200));
+    harness.finishSuccessfulCommit();
+    testHyphenationIdentity = 42;
+    Section reopened(harness.epub, 0, harness.renderer);
+    EXPECT_FALSE(reopened.loadSectionFile(harness.spec));
+  }
+}
+
+TEST_F(SectionPersistenceTest, PatternChangesDoNotInvalidateDisabledHyphenation) {
+  SectionHarness harness;
+  harness.spec.hyphenationEnabled = false;
+  harness.begin();
+  harness.appendPages(1);
+  ASSERT_TRUE(harness.commit(kFullVersion));
+  harness.finishSuccessfulCommit();
+  testHyphenationIdentity = 99;
+  Section reopened(harness.epub, 0, harness.renderer);
+  EXPECT_TRUE(reopened.loadSectionFile(harness.spec));
+}
+
+TEST_F(SectionPersistenceTest, CharacterSpacingInvalidatesCompleteAndPartialSections) {
+  for (const auto version : {kFullVersion, kPartialVersion}) {
+    Storage.reset();
+    SectionHarness harness;
+    harness.spec.characterSpacing = -5;
+    harness.begin();
+    harness.appendPages(1);
+    ASSERT_TRUE(harness.commit(version, version == kPartialVersion ? 100 : 0, 200));
+    harness.finishSuccessfulCommit();
+    Section reopened(harness.epub, 0, harness.renderer);
+    EXPECT_TRUE(reopened.loadSectionFile(harness.spec));
+    harness.spec.characterSpacing = 5;
+    EXPECT_FALSE(reopened.loadSectionFile(harness.spec));
+  }
+}

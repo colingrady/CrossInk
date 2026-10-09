@@ -9,6 +9,9 @@
 #include <limits>
 #include <string>
 
+#include "DailyReadingStats.h"
+#include "util/FileContentEquals.h"
+
 namespace {
 enum class StatsLoadResult : uint8_t { Ok, Invalid, NewerFormat };
 
@@ -195,6 +198,13 @@ bool verifyFileSize(const char* path, const size_t expectedSize) {
 }
 
 bool saveToFile(const GlobalReadingStats& stats, const char* path, const char* backupPath) {
+  uint8_t data[GLOBAL_STATS_FILE_SIZE];
+  serializeStats(stats, data);
+
+  // Reader exit saves unconditionally; a quick open-and-close changes nothing.
+  const bool unchanged = fileContentEquals("GSTATS", path, data, sizeof(data));
+  if (unchanged) return true;
+
   const std::string tmpPath = std::string(path) + ".tmp";
   if (Storage.exists(tmpPath.c_str()) && !Storage.remove(tmpPath.c_str())) {
     LOG_ERR("GSTATS", "Could not remove stale stats temp file: %s", tmpPath.c_str());
@@ -207,8 +217,6 @@ bool saveToFile(const GlobalReadingStats& stats, const char* path, const char* b
     return false;
   }
 
-  uint8_t data[GLOBAL_STATS_FILE_SIZE];
-  serializeStats(stats, data);
   const size_t bytesWritten = f.write(data, GLOBAL_STATS_FILE_SIZE);
   if (bytesWritten != GLOBAL_STATS_FILE_SIZE) {
     LOG_ERR("GSTATS", "Short write for stats temp file %s: %u/%u bytes", tmpPath.c_str(),
@@ -274,6 +282,15 @@ static StatsLoadOutcome loadFromFile(const char* path, GlobalReadingStats& out) 
   outcome = loadFromOpenFile(f, out);
   f.close();
   return outcome;
+}
+
+bool GlobalReadingStats::loadForUpload(GlobalReadingStats& stats) {
+  stats = {};
+  const auto primary = loadFromFile(GLOBAL_STATS_PATH, stats);
+  if (primary.result == StatsLoadResult::Ok) return true;
+  if (primary.result == StatsLoadResult::NewerFormat) return false;
+  const auto backup = loadFromFile(GLOBAL_STATS_BAK_PATH, stats);
+  return backup.result == StatsLoadResult::Ok;
 }
 
 GlobalReadingStats GlobalReadingStats::load() {
@@ -362,6 +379,7 @@ GlobalReadingStats GlobalReadingStats::loadAggregated(const GlobalReadingStats& 
 }
 
 void GlobalReadingStats::save() const {
+  if (!DailyReadingStats::flush()) LOG_ERR("GSTATS", "Failed to flush daily reading counters");
   if (s_blockDestructiveSave) {
     LOG_ERR("GSTATS", "Refusing to overwrite on-disk stats after newer-format file was detected");
     return;
@@ -369,7 +387,15 @@ void GlobalReadingStats::save() const {
   saveToFile(*this, GLOBAL_STATS_PATH, GLOBAL_STATS_BAK_PATH);
 }
 
-bool GlobalReadingStats::resetLocal() { return saveToFile(GlobalReadingStats{}, GLOBAL_STATS_PATH, nullptr); }
+static uint32_t s_localResetRevision = 0;
+
+bool GlobalReadingStats::resetLocal() {
+  if (!saveToFile(GlobalReadingStats{}, GLOBAL_STATS_PATH, nullptr)) return false;
+  s_localResetRevision++;
+  return true;
+}
+
+uint32_t GlobalReadingStats::localResetRevision() { return s_localResetRevision; }
 
 void GlobalReadingStats::recordReadingSpan(const ReadingStatsDateTime& localStart, const uint32_t seconds) {
   recordReadingSpanIntoBuckets(timeOfDaySeconds, dayOfWeekSeconds, localStart, seconds);

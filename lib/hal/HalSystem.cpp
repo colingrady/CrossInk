@@ -258,6 +258,10 @@ void begin() {
 void checkPanic() {
   if (isRebootFromPanic()) {
     auto panicInfo = getPanicInfo(true);
+    // The report now owns the old text; capture logs from this boot again even
+    // if the SD card cannot save the report.
+    clearLastLogs();
+    pauseLogRetention(false);
     auto file = Storage.open("/crash_report.txt", O_WRITE | O_CREAT | O_TRUNC);
     if (file) {
       const size_t written = file.write(panicInfo.c_str(), panicInfo.size());
@@ -291,6 +295,7 @@ void clearPanic() {
   panicCoreCaptureCount = 0;
 #endif
   clearLastLogs();
+  pauseLogRetention(false);
 }
 
 std::string getPanicInfo(bool full) {
@@ -299,7 +304,7 @@ std::string getPanicInfo(bool full) {
   } else {
     std::string info;
 
-    info += "CrossInk version: " CROSSINK_VERSION;
+    info += std::string("CrossInk version: ") + AppVersion::version();
     info += "\nCrossInk device type: " CROSSINK_FIRMWARE_DEVICE_TYPE;
     char elfSha[65] = {};
     esp_app_get_elf_sha256(elfSha, sizeof(elfSha));
